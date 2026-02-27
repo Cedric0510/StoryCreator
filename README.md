@@ -28,6 +28,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 # ou (nouveau nom Supabase):
 # NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 NEXT_PUBLIC_ENABLE_SELF_SIGNUP=false
+ENABLE_HTTP_BASIC=false
 BETA_HTTP_BASIC_USER=...
 BETA_HTTP_BASIC_PASS=...
 SUPABASE_SERVICE_ROLE_KEY=...
@@ -115,5 +116,6 @@ npm run build
 
 - Le fichier `.vercelignore` exclut `supabase/`, `docs/` et `.github/` du bundle de build.
 - Les scripts SQL restent en local/repo pour la traçabilité infra, sans etre deployes dans l'artefact Vercel.
-- En production, un middleware applique une authentification HTTP Basic (BETA_HTTP_BASIC_USER / BETA_HTTP_BASIC_PASS) pour restreindre l'acces beta.
-# StoryCreator
+- Auth HTTP Basic optionnelle en production:
+  - `ENABLE_HTTP_BASIC=true` active le prompt HTTP Basic.
+  - `ENABLE_HTTP_BASIC=false` desactive ce prompt (auth Supabase uniquement).

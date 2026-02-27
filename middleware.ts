@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
+function toBoolean(value: string | undefined, fallback = false) {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 function unauthorizedResponse() {
   return new NextResponse("Acces restreint", {
     status: 401,
@@ -11,6 +19,11 @@ function unauthorizedResponse() {
 
 export function middleware(request: NextRequest) {
   if (process.env.NODE_ENV !== "production") {
+    return NextResponse.next();
+  }
+
+  const basicAuthEnabled = toBoolean(process.env.ENABLE_HTTP_BASIC, false);
+  if (!basicAuthEnabled) {
     return NextResponse.next();
   }
 
