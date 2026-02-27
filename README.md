@@ -1,36 +1,119 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LNovel Author Studio
 
-## Getting Started
+Studio web pour creer des light novels data-driven:
+- graphe de blocs (`title`, `cinematic`, `dialogue`, `gameplay`)
+- variables et effets `+/-`
+- preview de parcours
+- export `story.json + assets` en ZIP
+- sauvegarde cloud Supabase (projets, droits, logs)
+- partage collaborateurs par email
+- maintenance assets (nettoyage refs locales + purge cloud orphelins)
 
-First, run the development server:
+## Prerequis
+
+- Node.js 20+
+- Un projet Supabase
+
+## Installation
+
+```bash
+npm install
+```
+
+Copie `.env.example` en `.env.local` puis renseigne:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+# ou (nouveau nom Supabase):
+# NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+NEXT_PUBLIC_ENABLE_SELF_SIGNUP=false
+BETA_HTTP_BASIC_USER=...
+BETA_HTTP_BASIC_PASS=...
+SUPABASE_SERVICE_ROLE_KEY=...
+# ou (nouveau nom Supabase):
+# SUPABASE_SECRET_KEY=...
+```
+
+## Setup Supabase
+
+Execute les migrations SQL dans cet ordre:
+
+- `supabase/migrations/20260224_author_studio.sql`
+- puis `supabase/migrations/20260224_fix_rls_stack_depth.sql`
+- puis `supabase/migrations/20260224_storage_assets.sql`
+  (bucket Storage `author-assets` + policies assets)
+- puis `supabase/migrations/20260224_harden_security_locking.sql`
+  (durcissement profils + verrou cloud atomique + indexes)
+- puis `supabase/migrations/20260225_platform_roles_admin.sql`
+- puis `supabase/migrations/20260227_security_reader_hardening.sql`
+  (lecteur par defaut + verrouillage des champs sensibles + hardening ecriture)
+
+Important: si tu vois l'erreur `stack depth limit exceeded`, c'est que le patch
+RLS ci-dessus n'a pas ete applique (ou pas sur le bon projet Supabase).
+
+Cette migration cree:
+- `author_projects` (payload JSON du projet)
+- `author_project_access` (droits `owner|write|read`)
+- `author_project_logs` (journal cloud)
+- `author_profiles` (annuaire auteur)
+- RLS + policies (lecture/ecriture selon droits)
+- bucket Supabase Storage `author-assets` (medias image/video/audio)
+- fonctions RPC securisees:
+  - `project_member_profiles`
+  - `project_resolve_user_by_email`
+  - `acquire_project_lock`
+  - `release_project_lock`
+
+## Lancer
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Puis ouvre `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Workflow cloud actuel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Connexion via l'encart Supabase Cloud : entre ton email + mot de passe, clique `Se connecter` (ou `Creer un compte` si tu n'as pas encore de compte).
+2. `Creer + sauvegarder` pour creer un projet cloud ; les assets sont uploades dans Storage et la liste des projets apparait automatiquement.
+3. Clique sur `Ouvrir` dans la liste `Mes projets cloud` pour recharger un projet existant sans copier d'UUID.
+4. Prends un verrou cloud avant edition (`Prendre verrou cloud`), puis libere-le en fin de session.
+5. Partage via email du collaborateur et niveau `read|write`.
+6. Protection anti ecrasement: sauvegarde refusee si une revision cloud plus recente existe.
+7. Maintenance assets:
+   - `Nettoyer refs locales` retire les references non utilisees du payload local.
+   - `Nettoyer assets cloud` supprime dans Storage les fichiers non references par le projet.
 
-## Learn More
+Note migration assets: les projets sauvegardes avant cette version peuvent avoir des
+assets sans `storagePath`. Reimporte ces fichiers une fois puis sauvegarde cloud.
 
-To learn more about Next.js, take a look at the following resources:
+## Contrat JSON
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Le format exporte est documente ici:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `docs/story-json-contract.md`
 
-## Deploy on Vercel
+## RGPD / Legal (minimum)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Politique de confidentialite (modele): `docs/legal/politique-confidentialite.md`
+- Mentions legales (modele): `docs/legal/mentions-legales.md`
+- Pages web publiques:
+  - `/confidentialite`
+  - `/mentions-legales`
+Les pages publiques lisent des valeurs `LEGAL_*` (voir `.env.example`) pour personnaliser les informations legales.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Verification
+
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
+## Deploiement Vercel (hygiene)
+
+- Le fichier `.vercelignore` exclut `supabase/`, `docs/` et `.github/` du bundle de build.
+- Les scripts SQL restent en local/repo pour la traçabilité infra, sans etre deployes dans l'artefact Vercel.
+- En production, un middleware applique une authentification HTTP Basic (BETA_HTTP_BASIC_USER / BETA_HTTP_BASIC_PASS) pour restreindre l'acces beta.
+# StoryCreator
