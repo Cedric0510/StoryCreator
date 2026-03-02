@@ -65,6 +65,7 @@ export function buildEdge(source: string, target: string, sourceHandle: string, 
 
   return {
     id: createId("edge"),
+    type: "deletable",
     source,
     target,
     sourceHandle,
@@ -80,17 +81,7 @@ export function buildEdge(source: string, target: string, sourceHandle: string, 
     },
     ...(targetHandle ? { targetHandle } : {}),
     label: derivedLabel,
-    labelStyle: {
-      fontSize: 11,
-      fontWeight: 700,
-      fill: "#0f172a",
-    },
-    labelBgPadding: [5, 3],
-    labelBgBorderRadius: 8,
-    labelBgStyle: {
-      fill: "#cbd5e1",
-      fillOpacity: 0.94,
-    },
+    data: { label: derivedLabel ?? undefined },
   };
 }
 

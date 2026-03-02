@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -14,6 +15,7 @@ import {
   Connection,
   Controls,
   EdgeChange,
+  EdgeTypes,
   MiniMap,
   NodeChange,
   NodeTypes,
@@ -27,7 +29,7 @@ import { AuthorStudioBlockEditorPanel } from "@/components/AuthorStudioBlockEdit
 import { AuthorStudioProjectPanel } from "@/components/AuthorStudioProjectPanel";
 import { AuthorStudioStatusPanel } from "@/components/AuthorStudioStatusPanel";
 import { HelpHint } from "@/components/HelpHint";
-import { StoryNode, StoryNodeData } from "@/components/StoryNode";
+import { StoryNode, StoryNodeData, DeletableEdge } from "@/components/StoryNode";
 import { useCloudProjectActions } from "@/components/useCloudProjectActions";
 import { useCloudProjectState } from "@/components/useCloudProjectState";
 import { useCloudProjectSession } from "@/components/useCloudProjectSession";
@@ -94,6 +96,7 @@ interface GameplayDragState {
 }
 
 const nodeTypes: NodeTypes = { storyBlock: StoryNode };
+const edgeTypes: EdgeTypes = { deletable: DeletableEdge };
 
 function normalizeProjectItems(
   items: unknown,
@@ -334,6 +337,11 @@ export function AuthorStudioApp() {
     return map;
   }, [liveIssues]);
 
+  const deleteBlockRef = useRef<(blockId: string) => void>(() => {});
+  const stableDeleteBlock = useCallback((blockId: string) => {
+    deleteBlockRef.current(blockId);
+  }, []);
+
   const displayNodes = useMemo(
     () =>
       nodes.map((node) => {
@@ -348,10 +356,12 @@ export function AuthorStudioApp() {
             isStart: project.info.startBlockId === node.id,
             hasError: flags.hasError,
             hasWarning: flags.hasWarning,
+            canEdit,
+            onDeleteBlock: stableDeleteBlock,
           },
         };
       }),
-    [issuesByBlock, nodes, project.info.startBlockId],
+    [canEdit, issuesByBlock, nodes, project.info.startBlockId, stableDeleteBlock],
   );
 
   const selectedNode = useMemo(
@@ -827,26 +837,26 @@ export function AuthorStudioApp() {
     [canEdit, logAction, nodes.length, project.info.startBlockId],
   );
 
-  const deleteSelectedBlock = useCallback(() => {
-    if (!canEdit || !selectedBlockId) return;
+  const deleteBlock = useCallback((blockId: string) => {
+    if (!canEdit) return;
 
-    const deleted = blockById.get(selectedBlockId);
+    const deleted = blockById.get(blockId);
     if (!deleted) return;
 
     setNodes((current) =>
       current
-        .filter((node) => node.id !== selectedBlockId)
+        .filter((node) => node.id !== blockId)
         .map((node) => ({
           ...node,
           data: {
             ...node.data,
-            block: removeNodeReferences(node.data.block, selectedBlockId),
+            block: removeNodeReferences(node.data.block, blockId),
           },
         })),
     );
     setEdges((current) =>
       current.filter(
-        (edge) => edge.source !== selectedBlockId && edge.target !== selectedBlockId,
+        (edge) => edge.source !== blockId && edge.target !== blockId,
       ),
     );
 
@@ -855,17 +865,58 @@ export function AuthorStudioApp() {
       info: {
         ...current.info,
         startBlockId:
-          current.info.startBlockId === selectedBlockId
+          current.info.startBlockId === blockId
             ? null
             : current.info.startBlockId,
         updatedAt: new Date().toISOString(),
       },
     }));
 
-    setSelectedBlockId(null);
+    if (selectedBlockId === blockId) setSelectedBlockId(null);
     logAction("delete_block", `${deleted.name} (${deleted.id})`);
     setStatusMessage(`Bloc ${deleted.name} supprime.`);
   }, [blockById, canEdit, logAction, selectedBlockId]);
+  deleteBlockRef.current = deleteBlock;
+
+  const deleteSelectedBlock = useCallback(() => {
+    if (selectedBlockId) deleteBlock(selectedBlockId);
+  }, [deleteBlock, selectedBlockId]);
+
+  const deleteEdge = useCallback(
+    (sourceId: string, sourceHandle: string) => {
+      if (!canEdit) return;
+      const sourceBlock = blockById.get(sourceId);
+      if (!sourceBlock) return;
+
+      if (sourceHandle === "npc-link") {
+        // Find the dialogue block linked to this NPC
+        const linkedEdge = edges.find(
+          (e) => e.source === sourceId && (e.sourceHandle ?? "") === "npc-link",
+        );
+        if (linkedEdge) {
+          unlinkNpcProfileFromDialogue(linkedEdge.target);
+          logAction("unlink_edge", `PNJ ${sourceBlock.name} -> dialogue`);
+        }
+        return;
+      }
+
+      setConnection(sourceId, sourceHandle, null);
+      logAction("unlink_edge", `${sourceBlock.name} [${sourceHandle}]`);
+    },
+    [blockById, canEdit, edges, logAction, setConnection, unlinkNpcProfileFromDialogue],
+  );
+
+  const displayEdges = useMemo(
+    () =>
+      edges.map((edge) => ({
+        ...edge,
+        data: {
+          ...edge.data,
+          onDeleteEdge: canEdit ? deleteEdge : undefined,
+        },
+      })),
+    [canEdit, deleteEdge, edges],
+  );
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -2645,8 +2696,9 @@ export function AuthorStudioApp() {
             <main className="panel panel-canvas">
               <ReactFlow
                 nodes={displayNodes}
-                edges={edges}
+                edges={displayEdges}
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}

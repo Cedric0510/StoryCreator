@@ -1,6 +1,17 @@
 "use client";
 
-import { Handle, Node, NodeProps, Position } from "@xyflow/react";
+import { useCallback } from "react";
+import {
+  BaseEdge,
+  EdgeLabelRenderer,
+  EdgeProps,
+  getBezierPath,
+  Handle,
+  Node,
+  NodeProps,
+  Position,
+  useReactFlow,
+} from "@xyflow/react";
 
 import { HelpHint } from "@/components/HelpHint";
 import { BLOCK_LABELS, ChoiceBlock, DialogueBlock, StoryBlock, blockTypeColor } from "@/lib/story";
@@ -11,6 +22,8 @@ export interface StoryNodeData {
   isStart: boolean;
   hasError: boolean;
   hasWarning: boolean;
+  canEdit?: boolean;
+  onDeleteBlock?: (blockId: string) => void;
 }
 
 type StoryEditorNode = Node<StoryNodeData>;
@@ -159,6 +172,18 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
         >
           {blockHelp(data.block)}
         </HelpHint>
+        {data.canEdit && data.onDeleteBlock && (
+          <button
+            className="story-node-delete"
+            title="Supprimer ce bloc"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onDeleteBlock!(data.block.id);
+            }}
+          >
+            ✕
+          </button>
+        )}
       </header>
       <h4 className="story-node-title">{data.block.name || BLOCK_LABELS[data.block.type]}</h4>
       <p className="story-node-summary">{summary}</p>
@@ -189,5 +214,75 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
         </div>
       )}
     </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   DeletableEdge — edge with a delete button at midpoint
+   ═══════════════════════════════════════════════ */
+
+export interface DeletableEdgeData {
+  [key: string]: unknown;
+  label?: string;
+  onDeleteEdge?: (sourceId: string, sourceHandle: string) => void;
+}
+
+export function DeletableEdge({
+  source,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  style,
+  markerEnd,
+  data,
+  label,
+  labelStyle,
+  sourceHandleId,
+}: EdgeProps & { data?: DeletableEdgeData }) {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+
+  return (
+    <>
+      <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
+      <EdgeLabelRenderer>
+        <div
+          className="edge-label-container"
+          style={{
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+          }}
+        >
+          {label && (
+            <span
+              className="edge-label-text"
+              style={labelStyle as React.CSSProperties}
+            >
+              {label as string}
+            </span>
+          )}
+          {data?.onDeleteEdge && (
+            <button
+              className="edge-delete-btn"
+              title="Supprimer ce lien"
+              onClick={(e) => {
+                e.stopPropagation();
+                data.onDeleteEdge!(source, sourceHandleId ?? "next");
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </EdgeLabelRenderer>
+    </>
   );
 }
