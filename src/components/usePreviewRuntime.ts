@@ -98,11 +98,21 @@ export function usePreviewRuntime({
         : variables;
 
       if (block && block.type === "dialogue") {
-        const resolvedLineId = resolveDialogueLine(
+        let resolvedLineId = resolveDialogueLine(
           block,
           entryLineId || block.startLineId || block.lines[0]?.id || null,
           npcAffinity,
         );
+        // If the target line (and its fallback chain) all fail conditions,
+        // scan remaining lines in order to find the first one that passes.
+        if (!resolvedLineId) {
+          for (const l of block.lines) {
+            if (lineConditionsMet(l, npcAffinity)) {
+              resolvedLineId = l.id;
+              break;
+            }
+          }
+        }
         return {
           currentBlockId: targetBlockId,
           currentDialogueLineId: resolvedLineId,
@@ -245,11 +255,20 @@ export function usePreviewRuntime({
 
         if (resp.targetLineId && (!resp.targetBlockId || resp.targetBlockId === previewState.currentBlockId)) {
           // Resolve conditions on target line
-          const resolvedLineId = resolveDialogueLine(
+          let resolvedLineId = resolveDialogueLine(
             previewBlock,
             resp.targetLineId,
             nextAffinity,
           );
+          // Scan remaining lines if fallback chain fails
+          if (!resolvedLineId) {
+            for (const l of previewBlock.lines) {
+              if (lineConditionsMet(l, nextAffinity)) {
+                resolvedLineId = l.id;
+                break;
+              }
+            }
+          }
           setPreviewState({
             ...previewState,
             currentDialogueLineId: resolvedLineId,

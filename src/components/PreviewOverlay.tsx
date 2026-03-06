@@ -335,12 +335,20 @@ export function PreviewOverlay({
                 ? blockById.get(previewBlock.npcProfileBlockId)
                 : null;
 
-            const currentLine = previewBlock.lines.find(
-              (l) => l.id === previewState?.currentDialogueLineId,
-            ) ?? previewBlock.lines.find(
-              (l) => l.id === previewBlock.startLineId,
-            ) ?? previewBlock.lines[0];
-            if (!currentLine) return null;
+            const currentLine = previewState?.currentDialogueLineId
+              ? previewBlock.lines.find((l) => l.id === previewState.currentDialogueLineId) ?? null
+              : null;
+            if (!currentLine) {
+              // No line passes conditions — auto-continue to next block
+              return (
+                <div className="preview-vn-scene">
+                  <div className="preview-vn-dialogue-box">
+                    <p style={{ fontStyle: "italic", opacity: 0.7 }}>Aucune ligne de dialogue disponible (conditions non remplies).</p>
+                    <button className="preview-vn-next-btn" onClick={onContinue}>▶</button>
+                  </div>
+                </div>
+              );
+            }
 
             const speakerName =
               linkedNpc && linkedNpc.type === "npc_profile" && linkedNpc.npcName.trim()
