@@ -325,9 +325,11 @@ export function useCloudProjectActions({
 
       const logActionName = isCreate ? "cloud_create" : "cloud_save";
       const logActionDetails = isCreate ? "Projet cree dans Supabase" : "Sauvegarde cloud";
-      await appendCloudLog(targetProjectId, logActionName, logActionDetails);
-      await refreshCloudSideData(targetProjectId, isCreate ? sessionUserId : cloudOwnerId);
-      await refreshCloudProjects();
+
+      // Post-save cleanup — fire-and-forget so the UI unblocks immediately.
+      void appendCloudLog(targetProjectId, logActionName, logActionDetails);
+      void refreshCloudSideData(targetProjectId, isCreate ? sessionUserId : cloudOwnerId);
+      void refreshCloudProjects();
 
       if (isCreate) {
         setStatusMessage(`Projet cree et sauvegarde (${targetProjectId}).`);

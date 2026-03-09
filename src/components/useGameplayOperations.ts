@@ -27,8 +27,11 @@ import {
 interface GameplayDragState {
   objectId: string;
   pointerId: number;
+  mode: "move" | "resize";
   offsetX: number;
   offsetY: number;
+  origWidth: number;
+  origHeight: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -240,7 +243,7 @@ export function useGameplayOperations({
       if (!obj) return;
 
       const container = event.currentTarget.closest(
-        ".pointclick-editor-scene",
+        ".pointclick-editor-scene, .scene-composer-scene",
       ) as HTMLElement | null;
       if (!container) return;
       const containerRect = container.getBoundingClientRect();
@@ -255,8 +258,47 @@ export function useGameplayOperations({
       setGameplayDragState({
         objectId,
         pointerId: event.pointerId,
+        mode: "move",
         offsetX: xPercent - obj.x,
         offsetY: yPercent - obj.y,
+        origWidth: obj.width,
+        origHeight: obj.height,
+      });
+
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [canEdit, selectedBlock],
+  );
+
+  const startGameplayObjectResize = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => {
+      const block = asGameplay();
+      if (!block) return;
+      const obj = block.objects.find((o) => o.id === objectId);
+      if (!obj) return;
+
+      const container = event.currentTarget.closest(
+        ".pointclick-editor-scene, .scene-composer-scene",
+      ) as HTMLElement | null;
+      if (!container) return;
+      const containerRect = container.getBoundingClientRect();
+      if (containerRect.width <= 0 || containerRect.height <= 0) return;
+
+      const xPercent = ((event.clientX - containerRect.left) / containerRect.width) * 100;
+      const yPercent = ((event.clientY - containerRect.top) / containerRect.height) * 100;
+
+      container.setPointerCapture(event.pointerId);
+
+      setGameplayPlacementTarget(null);
+      setGameplayDragState({
+        objectId,
+        pointerId: event.pointerId,
+        mode: "resize",
+        offsetX: xPercent,
+        offsetY: yPercent,
+        origWidth: obj.width,
+        origHeight: obj.height,
       });
 
       event.preventDefault();
@@ -276,11 +318,24 @@ export function useGameplayOperations({
     const xPercent = ((event.clientX - containerRect.left) / containerRect.width) * 100;
     const yPercent = ((event.clientY - containerRect.top) / containerRect.height) * 100;
 
-    moveGameplayObject(
-      gameplayDragState.objectId,
-      xPercent - gameplayDragState.offsetX,
-      yPercent - gameplayDragState.offsetY,
-    );
+    if (gameplayDragState.mode === "move") {
+      moveGameplayObject(
+        gameplayDragState.objectId,
+        xPercent - gameplayDragState.offsetX,
+        yPercent - gameplayDragState.offsetY,
+      );
+    } else {
+      // resize: offset stores the pointer start position in %
+      const dxPercent = xPercent - gameplayDragState.offsetX;
+      const dyPercent = yPercent - gameplayDragState.offsetY;
+      const newW = Math.max(3, gameplayDragState.origWidth + dxPercent);
+      const newH = Math.max(3, gameplayDragState.origHeight + dyPercent);
+      updateGameplayObject(gameplayDragState.objectId, (obj) => ({
+        ...obj,
+        width: clampPercent(newW),
+        height: clampPercent(newH),
+      }));
+    }
     event.preventDefault();
   };
 
@@ -329,6 +384,7 @@ export function useGameplayOperations({
     removeGameplayCompletionEffect,
     // Scene interaction
     startGameplayObjectDrag,
+    startGameplayObjectResize,
     onGameplayScenePointerMove,
     onGameplayScenePointerEnd,
     onGameplaySceneClick,

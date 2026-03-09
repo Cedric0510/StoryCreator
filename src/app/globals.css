@@ -847,16 +847,6 @@ label {
    Scene Composer (dialogue block)
    ═══════════════════════════════════════════════ */
 
-.scene-composer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border: 1px solid #b0c4d4;
-  border-radius: 12px;
-  padding: 10px;
-  background: #ffffff;
-}
-
 .scene-composer-label {
   display: flex;
   align-items: center;
@@ -868,6 +858,7 @@ label {
 .scene-composer-scene {
   position: relative;
   width: 100%;
+  min-height: 520px;
   aspect-ratio: 9 / 16;
   border-radius: 10px;
   border: 1px dashed #9fb9ce;
@@ -876,6 +867,19 @@ label {
     linear-gradient(135deg, #edf5fc, #dce8f5);
   overflow: hidden;
   touch-action: none;
+}
+
+/* When used inside the panel, let the composer pop out wider */
+.scene-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #b0c4d4;
+  border-radius: 12px;
+  padding: 10px;
+  background: #ffffff;
+  margin-left: -60px;
+  margin-right: -60px;
 }
 
 /* Visual reference guides — horizontal and vertical */
@@ -1058,7 +1062,8 @@ label {
 }
 
 .pointclick-editor-scene {
-  cursor: crosshair;
+  cursor: default;
+  touch-action: none;
 }
 
 .pointclick-editor-empty-bg {
@@ -1078,14 +1083,12 @@ label {
 .preview-pointclick-overlay {
   position: absolute;
   border-radius: 8px;
-  border: 1px solid rgba(15, 118, 110, 0.55);
-  background:
-    linear-gradient(180deg, rgba(20, 184, 166, 0.16), rgba(15, 118, 110, 0.16)),
-    rgba(255, 255, 255, 0.35);
+  border: 1.5px dashed rgba(15, 118, 110, 0.45);
+  background: transparent;
   background-position: center;
   background-repeat: no-repeat;
-  background-size: cover;
-  overflow: hidden;
+  background-size: contain;
+  overflow: visible;
 }
 
 .pointclick-overlay-box {
@@ -1115,6 +1118,25 @@ label {
 .pointclick-overlay-active {
   outline: 2px solid #0f766e;
   outline-offset: 0;
+}
+
+.pointclick-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: rgba(15, 118, 110, 0.8);
+  border-radius: 4px 0 8px 0;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.pointclick-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
 }
 
 .pointclick-hotspot-box {
@@ -1385,7 +1407,10 @@ label {
 }
 
 .story-node-selected {
-  box-shadow: 0 0 0 3px rgba(14, 165, 166, 0.25), 0 12px 30px rgba(12, 32, 50, 0.16);
+  border-width: 5px;
+  box-shadow: 0 0 0 6px rgba(14, 165, 166, 0.5), 0 0 20px rgba(14, 165, 166, 0.3), 0 12px 30px rgba(12, 32, 50, 0.18);
+  transform: scale(1.04);
+  z-index: 10;
 }
 
 .story-node-header {
@@ -1533,11 +1558,19 @@ label {
 }
 
 .story-node-handle {
-  width: 9px;
-  height: 9px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   border: 2px solid #ffffff;
   background: #0f172a;
+}
+
+/* Invisible hit area around handles for easier grabbing when zoomed out */
+.story-node-handle::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 999px;
 }
 
 .story-node-issues {
@@ -2012,7 +2045,7 @@ label {
 /* ── DIALOGUE area (textbox + responses) ── */
 .preview-vn-dialogue-area {
   position: relative;
-  z-index: 5;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   background: linear-gradient(to top, rgba(4, 12, 24, 0.94) 70%, transparent);

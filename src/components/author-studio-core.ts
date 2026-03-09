@@ -4,8 +4,10 @@ import { StoryNodeData } from "@/components/StoryNode";
 import {
   AssetRef,
   BlockType,
+  CharacterLayer,
   ChoiceLabel,
   ChoiceBlock,
+  DEFAULT_CHARACTER_LAYOUT,
   DEFAULT_SCENE_LAYOUT,
   DialogueBlock,
   DialogueLine,
@@ -192,10 +194,13 @@ export function collectAssetIds(block: StoryBlock) {
     );
   }
   if (block.type === "dialogue") {
-    const lineVoiceIds = block.lines
+    const lineVoiceIds = (block.lines ?? [])
       .map((line) => line.voiceAssetId)
       .filter((value): value is string => Boolean(value));
-    return [block.backgroundAssetId, block.characterAssetId, block.npcImageAssetId, ...lineVoiceIds].filter(
+    const layerAssetIds = (block.characterLayers ?? [])
+      .map((layer) => layer.assetId)
+      .filter((value): value is string => Boolean(value));
+    return [block.backgroundAssetId, block.characterAssetId, block.npcImageAssetId, ...layerAssetIds, ...lineVoiceIds].filter(
       (value): value is string => Boolean(value),
     );
   }
@@ -623,8 +628,16 @@ export function serializeBlock(
       npcProfileBlockId: block.npcProfileBlockId,
       npcImageAssetId: block.npcImageAssetId,
       npcImagePath: assetPath(block.npcImageAssetId, assetRefs),
+      characterLayers: (block.characterLayers ?? []).map((layer) => ({
+        id: layer.id,
+        label: layer.label,
+        zIndex: layer.zIndex,
+        layout: layer.layout,
+        assetId: layer.assetId,
+        imagePath: assetPath(layer.assetId, assetRefs),
+      })),
       startLineId: block.startLineId,
-      lines: block.lines.map((line) => ({
+      lines: (block.lines ?? []).map((line) => ({
         id: line.id,
         speaker: line.speaker,
         text: line.text,
@@ -708,6 +721,7 @@ export function serializeBlock(
     mode: "point_and_click",
     objective: block.objective,
     backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
+    sceneLayout: block.sceneLayout,
     voicePath: assetPath(block.voiceAssetId, assetRefs),
     objects: block.objects.map((obj) => ({
       id: obj.id,
@@ -822,6 +836,17 @@ export function deserializeBlockFromExport(
         : [],
     }));
 
+    const rawCharLayers = Array.isArray(raw.characterLayers) ? raw.characterLayers : [];
+    const characterLayers: DialogueBlock["characterLayers"] = rawCharLayers.map(
+      (layer: Record<string, unknown>) => ({
+        id: (layer.id as string) ?? createId("clayer"),
+        assetId: resolveAssetId(layer.imagePath, pathToAssetId) ?? (typeof layer.assetId === "string" ? layer.assetId : null),
+        label: (layer.label as string) ?? "Perso",
+        zIndex: typeof layer.zIndex === "number" ? layer.zIndex : 1,
+        layout: (layer.layout as CharacterLayer["layout"] | undefined) ?? { ...DEFAULT_CHARACTER_LAYOUT },
+      }),
+    );
+
     return normalizeStoryBlock({
       ...base,
       type: "dialogue",
@@ -832,6 +857,7 @@ export function deserializeBlockFromExport(
       sceneLayout: raw.sceneLayout
         ? (raw.sceneLayout as typeof DEFAULT_SCENE_LAYOUT)
         : { ...DEFAULT_SCENE_LAYOUT },
+      characterLayers,
       lines,
       startLineId: (raw.startLineId as string) ?? (lines[0]?.id ?? ""),
     });
@@ -960,6 +986,7 @@ export function deserializeBlockFromExport(
       mode: "point_and_click" as const,
       objective: (raw.objective as string) ?? "",
       backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
+      sceneLayout: raw.sceneLayout,
       voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
       objects,
       links: rawLinks,

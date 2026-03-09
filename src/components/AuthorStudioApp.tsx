@@ -465,6 +465,9 @@ export function AuthorStudioApp() {
         if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
         if (selectedBlock.characterAssetId) void ensureAssetPreviewSrc(selectedBlock.characterAssetId);
         if (selectedBlock.npcImageAssetId) void ensureAssetPreviewSrc(selectedBlock.npcImageAssetId);
+        for (const layer of selectedBlock.characterLayers ?? []) {
+          if (layer.assetId) void ensureAssetPreviewSrc(layer.assetId);
+        }
         if (selectedBlock.npcProfileBlockId) {
           const npcBlock = blockById.get(selectedBlock.npcProfileBlockId);
           if (npcBlock?.type === "npc_profile") {
@@ -516,6 +519,9 @@ export function AuthorStudioApp() {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
         if (block.characterAssetId) wantedAssetIds.add(block.characterAssetId);
         if (block.npcImageAssetId) wantedAssetIds.add(block.npcImageAssetId);
+        for (const layer of block.characterLayers ?? []) {
+          if (layer.assetId) wantedAssetIds.add(layer.assetId);
+        }
         for (const line of block.lines) {
           if (line.voiceAssetId) wantedAssetIds.add(line.voiceAssetId);
         }
@@ -858,6 +864,91 @@ export function AuthorStudioApp() {
     if (selectedBlockId) deleteBlock(selectedBlockId);
   }, [deleteBlock, selectedBlockId]);
 
+  const duplicateSelectedBlock = useCallback(() => {
+    if (!canEdit || !selectedBlock) return;
+
+    // Deep-clone the block and assign fresh IDs
+    const clone = structuredClone(selectedBlock) as unknown as Record<string, unknown>;
+    const newId = createId(selectedBlock.type);
+    clone.id = newId;
+    clone.name = `${selectedBlock.name || BLOCK_LABELS[selectedBlock.type]} (copie)`;
+
+    // Offset position so the duplicate doesn't overlap
+    const pos = selectedBlock.position;
+    clone.position = { x: pos.x + 60, y: pos.y + 60 };
+
+    // Regenerate internal IDs for dialogue lines/responses
+    if (selectedBlock.type === "dialogue") {
+      const lines = clone.lines as Array<Record<string, unknown>>;
+      const lineIdMap = new Map<string, string>();
+      for (const line of lines) {
+        const oldLineId = line.id as string;
+        const newLineId = createId("line");
+        lineIdMap.set(oldLineId, newLineId);
+        line.id = newLineId;
+        const responses = line.responses as Array<Record<string, unknown>>;
+        for (const resp of responses) {
+          resp.id = createId("resp");
+          // Clear outgoing block connections — the user will re-wire them
+          resp.targetBlockId = null;
+        }
+      }
+      // Remap internal line-to-line navigation
+      for (const line of lines) {
+        const responses = line.responses as Array<Record<string, unknown>>;
+        for (const resp of responses) {
+          if (resp.targetLineId && lineIdMap.has(resp.targetLineId as string)) {
+            resp.targetLineId = lineIdMap.get(resp.targetLineId as string)!;
+          } else {
+            resp.targetLineId = null;
+          }
+        }
+      }
+      // Update startLineId to match the new first line
+      const oldStart = clone.startLineId as string;
+      clone.startLineId = lineIdMap.get(oldStart) ?? (lines[0]?.id ?? "");
+    }
+
+    // Regenerate IDs for choice options
+    if (selectedBlock.type === "choice") {
+      const choices = clone.choices as Array<Record<string, unknown>>;
+      for (const opt of choices) {
+        opt.id = createId("opt");
+        opt.targetBlockId = null;
+      }
+    }
+
+    // Regenerate IDs for gameplay objects
+    if (selectedBlock.type === "gameplay") {
+      const objects = clone.objects as Array<Record<string, unknown>>;
+      const idMap = new Map<string, string>();
+      for (const obj of objects) {
+        const oldId = obj.id as string;
+        const freshId = createId("gobj");
+        idMap.set(oldId, freshId);
+        obj.id = freshId;
+      }
+      // Remap linkedKeyId references
+      for (const obj of objects) {
+        if (obj.linkedKeyId && idMap.has(obj.linkedKeyId as string)) {
+          obj.linkedKeyId = idMap.get(obj.linkedKeyId as string)!;
+        }
+      }
+      clone.nextBlockId = null;
+    }
+
+    // Clear nextBlockId for block types that have one
+    if ("nextBlockId" in clone) {
+      clone.nextBlockId = null;
+    }
+
+    const newBlock = normalizeStoryBlock(clone as unknown as StoryBlock);
+    setNodes((current) => [...current, blockToNode(newBlock)]);
+    setSelectedBlockId(newBlock.id);
+    logAction("duplicate_block", `${BLOCK_LABELS[newBlock.type]} (${newBlock.id})`);
+    setStatusMessage(`Bloc duplique: ${newBlock.name}`);
+  }, [canEdit, selectedBlock, logAction]);
+
   const deleteEdge = useCallback(
     (sourceId: string, sourceHandle: string) => {
       if (!canEdit) return;
@@ -1073,6 +1164,7 @@ export function AuthorStudioApp() {
     updateGameplayCompletionEffect,
     removeGameplayCompletionEffect,
     startGameplayObjectDrag,
+    startGameplayObjectResize,
     onGameplayScenePointerMove,
     onGameplayScenePointerEnd,
     onGameplaySceneClick,
@@ -1878,6 +1970,7 @@ export function AuthorStudioApp() {
               blocks={blocks}
               visibleIssues={visibleIssues}
               onDeleteSelectedBlock={deleteSelectedBlock}
+              onDuplicateSelectedBlock={duplicateSelectedBlock}
               onRunValidation={runValidation}
               onSetStartBlock={setStartBlock}
               onSetSelectedDynamicField={setSelectedDynamicField}
@@ -1925,6 +2018,7 @@ export function AuthorStudioApp() {
               gameplayPlacementTarget={gameplayPlacementTarget}
               onSetGameplayPlacementTarget={setGameplayPlacementTarget}
               onStartGameplayObjectDrag={startGameplayObjectDrag}
+              onStartGameplayObjectResize={startGameplayObjectResize}
               onGameplaySceneClick={onGameplaySceneClick}
               onGameplayScenePointerMove={onGameplayScenePointerMove}
               onGameplayScenePointerEnd={onGameplayScenePointerEnd}

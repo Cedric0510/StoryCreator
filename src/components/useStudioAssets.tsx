@@ -147,6 +147,7 @@ export function useStudioAssets({
   }, []);
 
   const exportZip = useCallback(async () => {
+   try {
     const issues = validateStoryBlocks(blocks, project.info.startBlockId);
     setLastValidation(issues);
 
@@ -223,42 +224,67 @@ export function useStudioAssets({
     const zip = new JSZip();
     zip.file("story.json", JSON.stringify(payload, null, 2));
 
+    // Sort assets: local files first (instant), cloud downloads after.
+    const localAssets: string[] = [];
+    const cloudAssets: string[] = [];
     for (const assetId of referencedAssetIds) {
       const ref = assetRefs[assetId];
       if (!ref) continue;
-
-      const localFile = assetFiles[assetId];
-      if (localFile) {
-        zip.file(ref.packagePath, localFile);
-        continue;
+      if (assetFiles[assetId]) {
+        localAssets.push(assetId);
+      } else {
+        cloudAssets.push(assetId);
       }
-
-      if (!ref.storagePath) {
-        setStatusMessage(
-          `Asset manquant pour export: ${ref.fileName}. Reimporte le fichier puis sauvegarde cloud.`,
-        );
-        return;
-      }
-
-      if (!supabase || !authUser) {
-        setStatusMessage(
-          `Connexion cloud requise pour telecharger ${ref.fileName} depuis Supabase Storage.`,
-        );
-        return;
-      }
-
-      const bucket = ref.storageBucket ?? SUPABASE_ASSET_BUCKET;
-      const { data, error } = await supabase.storage.from(bucket).download(ref.storagePath);
-      if (error || !data) {
-        setStatusMessage(
-          `Erreur telechargement asset (${ref.fileName}): ${error?.message ?? "unknown"}`,
-        );
-        return;
-      }
-
-      zip.file(ref.packagePath, data);
     }
 
+    // Pack local files immediately.
+    for (const assetId of localAssets) {
+      zip.file(assetRefs[assetId].packagePath, assetFiles[assetId]);
+    }
+
+    // Download cloud assets in parallel batches.
+    if (cloudAssets.length > 0) {
+      if (!supabase || !authUser) {
+        setStatusMessage(
+          "Connexion cloud requise pour telecharger les assets depuis Supabase Storage.",
+        );
+        return;
+      }
+
+      const BATCH_SIZE = 5;
+      let downloaded = 0;
+      for (let i = 0; i < cloudAssets.length; i += BATCH_SIZE) {
+        const batch = cloudAssets.slice(i, i + BATCH_SIZE);
+        setStatusMessage(
+          `Export: telechargement assets ${downloaded + 1}-${Math.min(downloaded + batch.length, cloudAssets.length)}/${cloudAssets.length}...`,
+        );
+
+        const results = await Promise.all(
+          batch.map(async (assetId) => {
+            const ref = assetRefs[assetId];
+            if (!ref.storagePath) return { assetId, error: "storagePath manquant" } as const;
+            const bucket = ref.storageBucket ?? SUPABASE_ASSET_BUCKET;
+            const { data, error } = await supabase.storage.from(bucket).download(ref.storagePath);
+            if (error || !data) return { assetId, error: error?.message ?? "unknown" } as const;
+            return { assetId, data } as const;
+          }),
+        );
+
+        for (const result of results) {
+          if ("error" in result) {
+            const ref = assetRefs[result.assetId];
+            setStatusMessage(
+              `Erreur telechargement asset (${ref?.fileName ?? result.assetId}): ${result.error}`,
+            );
+            return;
+          }
+          zip.file(assetRefs[result.assetId].packagePath, result.data);
+        }
+        downloaded += batch.length;
+      }
+    }
+
+    setStatusMessage("Export: generation du ZIP...");
     const blob = await zip.generateAsync({
       type: "blob",
       compression: "DEFLATE",
@@ -268,6 +294,11 @@ export function useStudioAssets({
     downloadBlob(blob, `${project.info.slug || "story"}-bundle.zip`);
     setStatusMessage(`Export reussi: ${referencedAssetIds.size} asset(s) dans le ZIP.`);
     logAction("export_zip", `${referencedAssetIds.size} assets`);
+   } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[exportZip] unhandled export error:", msg, err);
+    setStatusMessage(`Erreur export: ${msg}`);
+   }
   }, [
     assetFiles,
     assetRefs,

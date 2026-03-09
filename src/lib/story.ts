@@ -302,6 +302,17 @@ export interface SceneLayerLayout {
   height: number;  // height in % of scene height
 }
 
+/** A single character image layer in a dialogue scene (up to 5 layers, z-index 1-5). */
+export interface CharacterLayer {
+  id: string;
+  assetId: string | null;
+  label: string;         // Display name e.g. "Perso 1", "PNJ archer"
+  zIndex: number;        // 1 (foreground) to 5 (far back)
+  layout: SceneLayerLayout;
+}
+
+export const DEFAULT_CHARACTER_LAYOUT: SceneLayerLayout = { x: 25, y: 10, width: 50, height: 80 };
+
 /** Persisted scene composition for a dialogue block. */
 export interface SceneLayout {
   background: SceneLayerLayout;
@@ -316,10 +327,14 @@ export const DEFAULT_SCENE_LAYOUT: SceneLayout = {
 export interface DialogueBlock extends BaseBlock {
   type: "dialogue";
   backgroundAssetId: string | null;
+  /** @deprecated Use characterLayers instead. Kept for migration. */
   characterAssetId: string | null;
   npcProfileBlockId: string | null;
+  /** @deprecated Use characterLayers instead. Kept for migration. */
   npcImageAssetId: string | null;
   sceneLayout: SceneLayout;
+  /** Multiple character/NPC image layers with z-ordering */
+  characterLayers: CharacterLayer[];
   lines: DialogueLine[];
   startLineId: string;
 }
@@ -329,6 +344,7 @@ export interface GameplayBlock extends BaseBlock {
   mode: GameplayMode;
   objective: string;
   backgroundAssetId: string | null;
+  sceneLayout: SceneLayout;
   voiceAssetId: string | null;
   /** V3: simplified objects with 4 types */
   objects: GameplayObject[];
@@ -749,6 +765,52 @@ function normalizeSceneLayout(raw: unknown): SceneLayout {
   };
 }
 
+function normalizeCharacterLayers(raw: unknown): CharacterLayer[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is Record<string, unknown> => item && typeof item === "object")
+    .map((item) => ({
+      id: typeof item.id === "string" ? item.id : createId("clayer"),
+      assetId: typeof item.assetId === "string" && item.assetId ? item.assetId : null,
+      label: typeof item.label === "string" ? item.label : "Perso",
+      zIndex: typeof item.zIndex === "number" && item.zIndex >= 1 && item.zIndex <= 5
+        ? item.zIndex
+        : 1,
+      layout: normalizeLayerLayout(item.layout, DEFAULT_CHARACTER_LAYOUT),
+    }));
+}
+
+/** Migrate legacy single characterAssetId / npcImageAssetId into characterLayers. */
+function migrateCharacterLayers(
+  raw: Record<string, unknown>,
+  existingLayers: CharacterLayer[],
+  sceneLayout: SceneLayout,
+): CharacterLayer[] {
+  if (existingLayers.length > 0) return existingLayers;
+  const layers: CharacterLayer[] = [];
+  if (typeof raw.characterAssetId === "string" && raw.characterAssetId) {
+    layers.push({
+      id: createId("clayer"),
+      assetId: raw.characterAssetId,
+      label: "Perso 1",
+      zIndex: 1,
+      layout: { ...sceneLayout.character },
+    });
+  }
+  if (typeof raw.npcImageAssetId === "string" && raw.npcImageAssetId) {
+    layers.push({
+      id: createId("clayer"),
+      assetId: raw.npcImageAssetId,
+      label: "PNJ",
+      zIndex: 2,
+      layout: layers.length > 0
+        ? { x: 50, y: 10, width: 50, height: 80 }
+        : { ...sceneLayout.character },
+    });
+  }
+  return layers;
+}
+
 export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
   const id = createId(type);
 
@@ -808,6 +870,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       npcProfileBlockId: null,
       npcImageAssetId: null,
       sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
+      characterLayers: [],
       lines: [firstLine],
       startLineId: firstLine.id,
     };
@@ -867,6 +930,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
     mode: "point_and_click",
     objective: "",
     backgroundAssetId: null,
+    sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
     voiceAssetId: null,
     objects: [],
     completionEffects: [],
@@ -1027,6 +1091,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
     mode: "point_and_click" as const,
     objective: block.objective ?? "",
     backgroundAssetId: block.backgroundAssetId ?? null,
+    sceneLayout: normalizeSceneLayout(raw.sceneLayout),
     voiceAssetId: block.voiceAssetId ?? null,
     objects,
     completionEffects: normalizeVariableEffects(block.completionEffects),
@@ -1067,6 +1132,8 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
         affinityEffects: normalizeAffinityEffects(choice.affinityEffects),
       }));
 
+      const sceneLayout = normalizeSceneLayout(raw.sceneLayout);
+
       return {
         ...block,
         entryEffects: normalizeVariableEffects(raw.entryEffects),
@@ -1078,7 +1145,8 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
           typeof raw.npcImageAssetId === "string" && raw.npcImageAssetId
             ? raw.npcImageAssetId as string
             : null,
-        sceneLayout: normalizeSceneLayout(raw.sceneLayout),
+        sceneLayout,
+        characterLayers: migrateCharacterLayers(raw, normalizeCharacterLayers(raw.characterLayers), sceneLayout),
         lines: [{
           id: lineId,
           speaker: oldSpeaker,
@@ -1093,6 +1161,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
     }
 
     // --- Normal v2 normalization ---
+    const sceneLayout = normalizeSceneLayout(raw.sceneLayout);
     return {
       ...block,
       entryEffects: normalizeVariableEffects(raw.entryEffects),
@@ -1104,7 +1173,8 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
         typeof raw.npcImageAssetId === "string" && raw.npcImageAssetId
           ? raw.npcImageAssetId as string
           : null,
-      sceneLayout: normalizeSceneLayout(raw.sceneLayout),
+      sceneLayout,
+      characterLayers: migrateCharacterLayers(raw, normalizeCharacterLayers(raw.characterLayers), sceneLayout),
       lines: Array.isArray(block.lines)
         ? block.lines.map((line) => ({
             ...line,
@@ -1202,7 +1272,7 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
   }
 
   if (block.type === "dialogue") {
-    return block.lines
+    return (block.lines ?? [])
       .flatMap((line) => line.responses)
       .map((resp) => resp.targetBlockId)
       .filter((targetId): targetId is string => Boolean(targetId));
@@ -1308,7 +1378,7 @@ export function validateStoryBlocks(
 
   for (const block of blocks) {
     if (block.type === "dialogue") {
-      if (block.lines.length === 0) {
+      if ((block.lines ?? []).length === 0) {
         issues.push({
           level: "error",
           message: "Ce dialogue ne contient aucune ligne.",
@@ -1316,9 +1386,9 @@ export function validateStoryBlocks(
         });
       }
 
-      const lineIds = new Set(block.lines.map((line) => line.id));
+      const lineIds = new Set((block.lines ?? []).map((line) => line.id));
 
-      for (const line of block.lines) {
+      for (const line of (block.lines ?? [])) {
         if (!line.text.trim()) {
           issues.push({
             level: "warning",
@@ -1410,6 +1480,14 @@ export function validateStoryBlocks(
             blockId: block.id,
           });
         }
+      }
+
+      if ((block.characterLayers ?? []).length > 5) {
+        issues.push({
+          level: "warning",
+          message: "Un dialogue ne peut pas contenir plus de 5 personnages.",
+          blockId: block.id,
+        });
       }
     } else if (block.type === "choice") {
       if (block.choices.length === 0) {

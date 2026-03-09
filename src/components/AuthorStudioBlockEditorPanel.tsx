@@ -5,8 +5,10 @@ import { GameplayPlacementTarget } from "@/components/author-studio-types";
 import { HelpHint } from "@/components/HelpHint";
 import {
   BLOCK_LABELS,
+  CharacterLayer,
   ChoiceBlock,
   CinematicBlock,
+  DEFAULT_CHARACTER_LAYOUT,
   DEFAULT_SCENE_LAYOUT,
   DialogueBlock,
   GameplayBlock,
@@ -21,12 +23,14 @@ import {
   StoryBlock,
   TitleBlock,
   ValidationIssue,
+  createId,
 } from "@/lib/story";
 
 /** Clipboard for dialogue scene visual layout (images + positioning). */
 interface DialogueSceneClipboard {
   backgroundAssetId: string | null;
   characterAssetId: string | null;
+  characterLayers: CharacterLayer[];
   sceneLayout: SceneLayout;
 }
 
@@ -45,6 +49,7 @@ interface AuthorStudioBlockEditorPanelProps {
   blocks: StoryBlock[];
   visibleIssues: ValidationIssue[];
   onDeleteSelectedBlock: () => void;
+  onDuplicateSelectedBlock: () => void;
   onRunValidation: () => void;
   onSetStartBlock: (blockId: string) => void;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
@@ -103,6 +108,7 @@ interface AuthorStudioBlockEditorPanelProps {
   gameplayPlacementTarget: GameplayPlacementTarget | null;
   onSetGameplayPlacementTarget: (target: GameplayPlacementTarget | null) => void;
   onStartGameplayObjectDrag: (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => void;
+  onStartGameplayObjectResize: (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => void;
   onGameplaySceneClick: (event: MouseEvent<HTMLDivElement>) => void;
   onGameplayScenePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onGameplayScenePointerEnd: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -446,7 +452,7 @@ function CinematicEditorSection({
    ═══════════════════════════════════════════════════════════ */
 
 interface SceneCopyPasteProps {
-  block: DialogueBlock | CinematicBlock;
+  block: DialogueBlock | CinematicBlock | GameplayBlock;
   canEdit: boolean;
   onUpdateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
   onStatusMessage: (message: string) => void;
@@ -463,12 +469,13 @@ function SceneCopyPaste({
   const copyScene = useCallback(() => {
     dialogueSceneClipboard = {
       backgroundAssetId: block.backgroundAssetId,
-      characterAssetId: block.characterAssetId,
+      characterAssetId: block.type !== "gameplay" ? block.characterAssetId : null,
+      characterLayers: block.type === "dialogue" ? structuredClone(block.characterLayers ?? []) : [],
       sceneLayout: structuredClone(block.sceneLayout),
     };
     setHasClipboard(true);
     onStatusMessage("Scene copiee (images + positionnement).");
-  }, [block.backgroundAssetId, block.characterAssetId, block.sceneLayout, onStatusMessage]);
+  }, [block, onStatusMessage]);
 
   const pasteScene = useCallback(() => {
     if (!dialogueSceneClipboard) return;
@@ -478,7 +485,7 @@ function SceneCopyPaste({
         return {
           ...b,
           backgroundAssetId: clip.backgroundAssetId,
-          characterAssetId: b.npcProfileBlockId ? b.characterAssetId : clip.characterAssetId,
+          characterLayers: structuredClone(clip.characterLayers),
           sceneLayout: structuredClone(clip.sceneLayout),
         };
       }
@@ -487,6 +494,13 @@ function SceneCopyPaste({
           ...b,
           backgroundAssetId: clip.backgroundAssetId,
           characterAssetId: clip.characterAssetId,
+          sceneLayout: structuredClone(clip.sceneLayout),
+        };
+      }
+      if (b.type === "gameplay") {
+        return {
+          ...b,
+          backgroundAssetId: clip.backgroundAssetId,
           sceneLayout: structuredClone(clip.sceneLayout),
         };
       }
@@ -519,20 +533,38 @@ function SceneCopyPaste({
    Scene Composer — gameplay-style drag & resize
    ═══════════════════════════════════════════════ */
 
+interface SceneCharacterLayerInfo {
+  key: string;
+  label: string;
+  src: string | undefined;
+  zIndex: number;
+  layout: SceneLayerLayout;
+}
+
 interface SceneComposerProps {
   layout: SceneLayout;
   bgSrc: string | undefined;
-  charSrc: string | undefined;
+  characterLayers?: SceneCharacterLayerInfo[];
+  /** @deprecated single character for cinematic blocks */
+  charSrc?: string | undefined;
   canEdit: boolean;
   onChange: (layout: SceneLayout) => void;
+  onChangeCharacterLayout?: (layerId: string, layout: SceneLayerLayout) => void;
+  children?: ReactNode;
+  sceneClassName?: string;
+  onSceneClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onScenePointerMove?: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onScenePointerUp?: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onScenePointerCancel?: (e: React.PointerEvent<HTMLDivElement>) => void;
 }
 
-type LayerKey = "background" | "character";
+type DragTarget = { kind: "bg" } | { kind: "char" } | { kind: "layer"; layerId: string };
 
-function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneComposerProps) {
+function SceneComposer({ layout: layoutProp, bgSrc, characterLayers, charSrc, canEdit, onChange, onChangeCharacterLayout, children, sceneClassName, onSceneClick, onScenePointerMove, onScenePointerUp, onScenePointerCancel }: SceneComposerProps) {
+  const layout = layoutProp ?? DEFAULT_SCENE_LAYOUT;
   const sceneRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
-    layer: LayerKey;
+    target: DragTarget;
     mode: "move" | "resize";
     startX: number;
     startY: number;
@@ -540,30 +572,44 @@ function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneCompo
   } | null>(null);
 
   const hasBg = Boolean(bgSrc);
-  const hasChar = Boolean(charSrc);
+  // Multi-layer mode
+  const layers = characterLayers ?? [];
+  const hasLayers = layers.length > 0;
+  // Fallback single char for cinematic
+  const hasSingleChar = Boolean(charSrc) && !hasLayers;
 
-  const updateLayer = useCallback(
-    (layer: LayerKey, patch: Partial<SceneLayerLayout>) => {
-      onChange({ ...layout, [layer]: { ...layout[layer], ...patch } });
-    },
-    [layout, onChange],
-  );
+  const getTargetLayout = useCallback((target: DragTarget): SceneLayerLayout => {
+    if (target.kind === "bg") return layout.background;
+    if (target.kind === "char") return layout.character;
+    return layers.find((l) => l.key === target.layerId)?.layout ?? { x: 0, y: 0, width: 50, height: 80 };
+  }, [layout, layers]);
+
+  const applyPatch = useCallback((target: DragTarget, patch: Partial<SceneLayerLayout>) => {
+    if (target.kind === "bg") {
+      onChange({ ...layout, background: { ...layout.background, ...patch } });
+    } else if (target.kind === "char") {
+      onChange({ ...layout, character: { ...layout.character, ...patch } });
+    } else if (onChangeCharacterLayout) {
+      const cur = layers.find((l) => l.key === target.layerId)?.layout ?? { x: 0, y: 0, width: 50, height: 80 };
+      onChangeCharacterLayout(target.layerId, { ...cur, ...patch });
+    }
+  }, [layout, layers, onChange, onChangeCharacterLayout]);
 
   const startDrag = useCallback(
-    (e: React.PointerEvent, layer: LayerKey, mode: "move" | "resize") => {
+    (e: React.PointerEvent, target: DragTarget, mode: "move" | "resize") => {
       if (!canEdit) return;
       e.preventDefault();
       e.stopPropagation();
       dragRef.current = {
-        layer,
+        target,
         mode,
         startX: e.clientX,
         startY: e.clientY,
-        origRect: { ...layout[layer] },
+        origRect: { ...getTargetLayout(target) },
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
-    [canEdit, layout],
+    [canEdit, getTargetLayout],
   );
 
   const handlePointerMove = useCallback(
@@ -575,54 +621,45 @@ function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneCompo
       const dy = ((e.clientY - d.startY) / rect.height) * 100;
 
       if (d.mode === "move") {
-        if (d.layer === "character") {
-          // Character may overflow scene bounds
-          updateLayer(d.layer, {
-            x: Math.round(d.origRect.x + dx),
-            y: Math.round(d.origRect.y + dy),
-          });
-        } else {
-          updateLayer(d.layer, {
-            x: Math.round(Math.min(100 - d.origRect.width, Math.max(0, d.origRect.x + dx))),
-            y: Math.round(Math.min(100 - d.origRect.height, Math.max(0, d.origRect.y + dy))),
-          });
-        }
+        applyPatch(d.target, {
+          x: Math.round(d.origRect.x + dx),
+          y: Math.round(d.origRect.y + dy),
+        });
       } else {
-        if (d.layer === "character") {
-          // Character may be scaled beyond 100%
-          updateLayer(d.layer, {
-            width: Math.round(Math.max(5, d.origRect.width + dx)),
-            height: Math.round(Math.max(5, d.origRect.height + dy)),
-          });
-        } else {
-          updateLayer(d.layer, {
-            width: Math.round(Math.min(100 - d.origRect.x, Math.max(5, d.origRect.width + dx))),
-            height: Math.round(Math.min(100 - d.origRect.y, Math.max(5, d.origRect.height + dy))),
-          });
-        }
+        applyPatch(d.target, {
+          width: Math.round(Math.max(5, d.origRect.width + dx)),
+          height: Math.round(Math.max(5, d.origRect.height + dy)),
+        });
       }
     },
-    [updateLayer],
+    [applyPatch],
   );
 
   const handlePointerUp = useCallback(() => {
     dragRef.current = null;
   }, []);
 
-  const renderLayerBox = (layer: LayerKey, src: string | undefined, label: string) => {
+  const renderBox = (
+    target: DragTarget,
+    r: SceneLayerLayout,
+    src: string | undefined,
+    label: string,
+    isChar: boolean,
+    zStyle?: number,
+  ) => {
     if (!src) return null;
-    const r = layout[layer];
-    const isChar = layer === "character";
     return (
       <div
+        key={target.kind === "layer" ? target.layerId : target.kind}
         className={`scene-composer-box${isChar ? " scene-composer-box-char" : ""}`}
         style={{
           left: `${r.x}%`,
           top: `${r.y}%`,
           width: `${r.width}%`,
           height: `${r.height}%`,
+          zIndex: zStyle ?? (isChar ? 2 : 1),
         }}
-        onPointerDown={(e) => startDrag(e, layer, "move")}
+        onPointerDown={(e) => startDrag(e, target, "move")}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
@@ -635,10 +672,9 @@ function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneCompo
           style={{ objectFit: isChar ? "contain" : "cover" }}
         />
         <span className="scene-composer-box-label">{label}</span>
-        {/* Resize handle (bottom-right corner) */}
         <div
           className="scene-composer-resize-handle"
-          onPointerDown={(e) => { e.stopPropagation(); startDrag(e, layer, "resize"); }}
+          onPointerDown={(e) => { e.stopPropagation(); startDrag(e, target, "resize"); }}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
@@ -668,7 +704,11 @@ function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneCompo
 
       <div
         ref={sceneRef}
-        className="scene-composer-scene"
+        className={`scene-composer-scene${sceneClassName ? ` ${sceneClassName}` : ""}`}
+        onClick={onSceneClick}
+        onPointerMove={onScenePointerMove}
+        onPointerUp={onScenePointerUp}
+        onPointerCancel={onScenePointerCancel}
       >
         {/* Visual reference guides — thirds + center */}
         <div className="scene-composer-guide scene-composer-guide-h" style={{ top: "33.33%" }} />
@@ -678,18 +718,26 @@ function SceneComposer({ layout, bgSrc, charSrc, canEdit, onChange }: SceneCompo
         <div className="scene-composer-guide scene-composer-guide-h" style={{ top: "66.66%" }} />
         <div className="scene-composer-guide scene-composer-guide-v" style={{ left: "50%" }} />
 
-        {/* Character size indicator */}
-        {hasChar && (
-          <div className="scene-composer-size-badge" title="Hauteur du personnage en % de la scene">
-            Perso {layout.character.height}%
-          </div>
-        )}
-
-        {!hasBg && !hasChar && (
+        {!hasBg && !hasLayers && !hasSingleChar && (
           <div className="scene-composer-empty">Ajoute un fond ou un personnage</div>
         )}
-        {renderLayerBox("background", bgSrc, "Fond")}
-        {renderLayerBox("character", charSrc, "Perso")}
+        {renderBox({ kind: "bg" }, layout.background, bgSrc, "Fond", false)}
+        {/* Multi-character layers sorted by zIndex (higher = behind) */}
+        {[...layers]
+          .sort((a, b) => b.zIndex - a.zIndex)
+          .map((layer) =>
+            renderBox(
+              { kind: "layer", layerId: layer.key },
+              layer.layout,
+              layer.src,
+              `${layer.label} (${layer.zIndex})`,
+              true,
+              10 - layer.zIndex,
+            ),
+          )}
+        {/* Fallback single character for cinematic blocks */}
+        {hasSingleChar && renderBox({ kind: "char" }, layout.character, charSrc, "Perso", true)}
+        {children}
       </div>
     </div>
   );
@@ -723,6 +771,8 @@ interface DialogueEditorSectionProps {
     value: string,
   ) => void;
   onRemoveResponseEffect: (lineId: string, responseId: string, effectIndex: number) => void;
+  onRegisterAsset: (file: File) => string;
+  onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
   onStatusMessage: (message: string) => void;
 }
 
@@ -748,6 +798,8 @@ function DialogueEditorSection({
   onAddResponseEffect,
   onUpdateResponseEffect,
   onRemoveResponseEffect,
+  onRegisterAsset,
+  onEnsureAssetPreviewSrc,
   onStatusMessage,
 }: DialogueEditorSectionProps) {
   const linkedNpcBlock =
@@ -768,6 +820,8 @@ function DialogueEditorSection({
   const npcBlocks = blocks.filter(
     (candidate): candidate is NpcProfileBlock => candidate.type === "npc_profile",
   );
+
+  const layers = block.characterLayers ?? [];
 
   return (
     <div className="subsection">
@@ -816,60 +870,178 @@ function DialogueEditorSection({
         />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
-      <label>
-        Image personnage
-        <input
-          type="file"
-          accept="image/*"
-          onChange={onAssetInput("characterAssetId")}
-          disabled={!canEdit}
-        />
-      </label>
-      {renderAssetAttachment("characterAssetId", block.characterAssetId)}
-      {linkedNpcBlock && linkedNpcBlock.imageAssetIds.length > 0 && (
-        <>
-          <label>
-            Image PNJ (optionnel)
-            <select
-              value={block.npcImageAssetId ?? ""}
+
+      {/* --- Character layers (multi-character with z-index) --- */}
+      <div className="section-title-row">
+        <div className="title-with-help">
+          <h3>Personnages ({layers.length}/5)</h3>
+          <HelpHint title="Personnages">
+            Ajoute jusqu&apos;a 5 images de personnages. Le cran (1-5) determine le plan : 1 = premier
+            plan (devant), 5 = arriere-plan (derriere). Chaque personnage a sa propre position
+            dans le compositeur de scene.
+          </HelpHint>
+        </div>
+        {layers.length < 5 && (
+          <label className="button-secondary" style={{ cursor: "pointer", margin: 0 }}>
+            + personnage
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                if (!canEdit) return;
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const assetId = onRegisterAsset(file);
+                void onEnsureAssetPreviewSrc(assetId);
+                const newLayer: CharacterLayer = {
+                  id: createId("clayer"),
+                  assetId,
+                  label: `Perso ${layers.length + 1}`,
+                  zIndex: Math.min(layers.length + 1, 5),
+                  layout: { ...DEFAULT_CHARACTER_LAYOUT },
+                };
+                onUpdateSelectedBlock((b) =>
+                  b.type === "dialogue"
+                    ? { ...b, characterLayers: [...(b.characterLayers ?? []), newLayer] }
+                    : b,
+                );
+                onStatusMessage(`Personnage ajoute: ${file.name}`);
+                event.target.value = "";
+              }}
+              disabled={!canEdit}
+            />
+          </label>
+        )}
+      </div>
+      {layers.length === 0 && (
+        <small className="empty-placeholder">Aucun personnage. Clique &quot;+ personnage&quot; pour en ajouter.</small>
+      )}
+      {layers.map((layer, layerIdx) => (
+        <div key={layer.id} className="choice-card" style={{ padding: "6px 8px" }}>
+          <div className="effect-row" style={{ gridTemplateColumns: "1fr 80px 28px", alignItems: "center" }}>
+            <input
+              type="text"
+              value={layer.label}
+              placeholder="Nom"
               onChange={(event) =>
-                onSetSelectedDynamicField("npcImageAssetId", event.target.value || null)
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "dialogue") return b;
+                  return {
+                    ...b,
+                    characterLayers: (b.characterLayers ?? []).map((l, i) =>
+                      i !== layerIdx ? l : { ...l, label: event.target.value },
+                    ),
+                  };
+                })
+              }
+              disabled={!canEdit}
+            />
+            <select
+              value={layer.zIndex}
+              onChange={(event) =>
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "dialogue") return b;
+                  return {
+                    ...b,
+                    characterLayers: (b.characterLayers ?? []).map((l, i) =>
+                      i !== layerIdx ? l : { ...l, zIndex: Number(event.target.value) },
+                    ),
+                  };
+                })
               }
               disabled={!canEdit}
             >
-              <option value="">Aucune</option>
-              {linkedNpcBlock.imageAssetIds.map((assetId, index) => (
-                <option key={assetId} value={assetId}>
-                  Image PNJ {index + 1}
-                </option>
-              ))}
+              <option value={1}>Cran 1</option>
+              <option value={2}>Cran 2</option>
+              <option value={3}>Cran 3</option>
+              <option value={4}>Cran 4</option>
+              <option value={5}>Cran 5</option>
             </select>
-          </label>
-          {renderAssetAttachment(
-            "npcImageAssetId",
-            block.npcImageAssetId,
-          )}
-        </>
-      )}
+            <button
+              className="button-danger"
+              onClick={() =>
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "dialogue") return b;
+                  return {
+                    ...b,
+                    characterLayers: (b.characterLayers ?? []).filter((_, i) => i !== layerIdx),
+                  };
+                })
+              }
+              disabled={!canEdit}
+              title="Retirer ce personnage"
+            >
+              x
+            </button>
+          </div>
+          <div className="asset-line">
+            <small>{assetPreviewSrcById[layer.assetId ?? ""] ? "Image chargee" : "Aucune image"}</small>
+            <label className="button-secondary" style={{ cursor: "pointer", margin: 0, fontSize: "0.75rem" }}>
+              Changer
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  if (!canEdit) return;
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  const assetId = onRegisterAsset(file);
+                  void onEnsureAssetPreviewSrc(assetId);
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "dialogue") return b;
+                    return {
+                      ...b,
+                      characterLayers: (b.characterLayers ?? []).map((l, i) =>
+                        i !== layerIdx ? l : { ...l, assetId },
+                      ),
+                    };
+                  });
+                  event.target.value = "";
+                }}
+                disabled={!canEdit}
+              />
+            </label>
+          </div>
+        </div>
+      ))}
 
       {/* --- Scene Composer --- */}
       {(() => {
         const bgSrc = assetPreviewSrcById[block.backgroundAssetId ?? ""];
-        const npcImgSrc = assetPreviewSrcById[block.npcImageAssetId ?? ""];
-        const charSrc = npcImgSrc || assetPreviewSrcById[block.characterAssetId ?? ""];
-        // Show composer when at least one image asset is assigned (even if URL not yet loaded)
-        const hasAnyAsset = block.backgroundAssetId || block.characterAssetId || block.npcImageAssetId;
+        const layerSrcs = layers
+          .map((layer, idx) => ({
+            key: layer.id,
+            label: layer.label || `Perso ${idx + 1}`,
+            src: assetPreviewSrcById[layer.assetId ?? ""],
+            zIndex: layer.zIndex,
+            layout: layer.layout,
+          }))
+          .filter((item) => item.src);
+        const hasAnyAsset = block.backgroundAssetId || layerSrcs.length > 0;
         if (!hasAnyAsset) return null;
         return (
           <SceneComposer
             layout={block.sceneLayout}
             bgSrc={bgSrc}
-            charSrc={charSrc}
+            characterLayers={layerSrcs}
             canEdit={canEdit}
             onChange={(newLayout) => {
               onUpdateSelectedBlock((b) =>
                 b.type === "dialogue" ? { ...b, sceneLayout: newLayout } : b,
               );
+            }}
+            onChangeCharacterLayout={(layerId, newLayerLayout) => {
+              onUpdateSelectedBlock((b) => {
+                if (b.type !== "dialogue") return b;
+                return {
+                  ...b,
+                  characterLayers: (b.characterLayers ?? []).map((l) =>
+                    l.id !== layerId ? l : { ...l, layout: newLayerLayout },
+                  ),
+                };
+              });
             }}
           />
         );
@@ -1100,6 +1272,7 @@ function DialogueEditorSection({
           <label>
             Personnage
             <input
+              list={`npc-names-${line.id}`}
               value={
                 linkedNpcBlock?.npcName.trim()
                   ? linkedNpcBlock.npcName
@@ -1110,6 +1283,13 @@ function DialogueEditorSection({
               }
               disabled={!canEdit || Boolean(linkedNpcBlock)}
             />
+            <datalist id={`npc-names-${line.id}`}>
+              {blocks
+                .filter((b): b is NpcProfileBlock => b.type === "npc_profile" && b.npcName.trim() !== "")
+                .map((npc) => (
+                  <option key={npc.id} value={npc.npcName} />
+                ))}
+            </datalist>
           </label>
           <label>
             Replique
@@ -1696,6 +1876,7 @@ interface GameplayEditorSectionProps {
   gameplayPlacementTarget: GameplayPlacementTarget | null;
   onSetGameplayPlacementTarget: (target: GameplayPlacementTarget | null) => void;
   onStartGameplayObjectDrag: (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => void;
+  onStartGameplayObjectResize: (event: ReactPointerEvent<HTMLDivElement>, objectId: string) => void;
   onGameplaySceneClick: (event: MouseEvent<HTMLDivElement>) => void;
   onGameplayScenePointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onGameplayScenePointerEnd: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -1731,6 +1912,7 @@ function GameplayEditorSection({
   gameplayPlacementTarget,
   onSetGameplayPlacementTarget,
   onStartGameplayObjectDrag,
+  onStartGameplayObjectResize,
   onGameplaySceneClick,
   onGameplayScenePointerMove,
   onGameplayScenePointerEnd,
@@ -1752,8 +1934,7 @@ function GameplayEditorSection({
     modify_stats: "Modifie les stats",
   };
 
-  // Build a helper to draw SVG arrows from key → lock on the scene
-  const sceneRef = useRef<HTMLDivElement>(null);
+  // Build key→lock arrow pairs for the scene overlay
   const keyLockPairs = block.objects
     .filter((o) => o.objectType === "lock" && o.linkedKeyId)
     .map((lock) => {
@@ -1783,6 +1964,14 @@ function GameplayEditorSection({
         />
       </label>
 
+      {/* --- Scene clipboard: copy / paste images + layout --- */}
+      <SceneCopyPaste
+        block={block}
+        canEdit={canEdit}
+        onUpdateSelectedBlock={onUpdateSelectedBlock}
+        onStatusMessage={onStatusMessage}
+      />
+
       {/* ── Background ── */}
       <label>
         Image fond
@@ -1790,91 +1979,87 @@ function GameplayEditorSection({
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
 
-      {/* ── Visual scene with arrows ── */}
-      <div className="pointclick-editor-scene-wrap">
-        <div className="section-title-row">
-          <div className="title-with-help">
-            <strong>Scene interactive</strong>
-            <HelpHint title="Placement visuel">
-              Glisse les objets pour les positionner. Clique &quot;Placer&quot; puis clique dans la scene.
-            </HelpHint>
-          </div>
-          <small>
-            {gameplayPlacementTarget
-              ? "Clique dans la scene pour placer l'objet"
-              : "Deplace les objets a la souris"}
-          </small>
-        </div>
-        <div
-          ref={sceneRef}
-          className="pointclick-editor-scene"
-          onClick={onGameplaySceneClick}
-          onPointerMove={onGameplayScenePointerMove}
-          onPointerUp={onGameplayScenePointerEnd}
-          onPointerCancel={onGameplayScenePointerEnd}
-          style={
-            assetPreviewSrcById[block.backgroundAssetId ?? ""]
-              ? { backgroundImage: `url(${assetPreviewSrcById[block.backgroundAssetId ?? ""]})` }
-              : undefined
-          }
-        >
-          {!assetPreviewSrcById[block.backgroundAssetId ?? ""] && (
-            <div className="pointclick-editor-empty-bg">Ajoute une image de fond</div>
-          )}
-
-          {[...block.objects]
-            .sort((a, b) => a.zIndex - b.zIndex)
-            .map((obj) => (
-              <div
-                key={obj.id}
-                className={`pointclick-overlay-box ${
-                  gameplayPlacementTarget?.objectId === obj.id ? "pointclick-overlay-active" : ""
-                } pointclick-type-${obj.objectType}`}
-                style={{
-                  left: `${obj.x}%`,
-                  top: `${obj.y}%`,
-                  width: `${obj.width}%`,
-                  height: `${obj.height}%`,
-                  zIndex: obj.zIndex,
-                  backgroundImage: assetPreviewSrcById[obj.assetId ?? ""]
-                    ? `url(${assetPreviewSrcById[obj.assetId ?? ""]})`
-                    : undefined,
-                  opacity: obj.visibleByDefault ? 1 : 0.45,
-                }}
-                onPointerDown={(event) => onStartGameplayObjectDrag(event, obj.id)}
-                onClick={(event) => event.stopPropagation()}
-              >
-                {!assetPreviewSrcById[obj.assetId ?? ""] && <span>{obj.name || "Objet"}</span>}
-              </div>
-            ))}
-
-          {/* SVG arrows from key center → lock center */}
-          <svg className="pointclick-arrows-svg">
-            {keyLockPairs.map(({ key: k, lock: l }) => {
-              const kx = k.x + k.width / 2;
-              const ky = k.y + k.height / 2;
-              const lx = l.x + l.width / 2;
-              const ly = l.y + l.height / 2;
-              return (
-                <line
-                  key={`${k.id}-${l.id}`}
-                  x1={`${kx}%`} y1={`${ky}%`}
-                  x2={`${lx}%`} y2={`${ly}%`}
-                  stroke="#f59e0b"
-                  strokeWidth="2"
-                  strokeDasharray="6 4"
-                  markerEnd="url(#arrowhead)"
-                />
-              );
-            })}
-            <defs>
-              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" />
-              </marker>
-            </defs>
-          </svg>
-        </div>
+      {/* ── Unified scene: background composer + interactive objects ── */}
+      <div className="section-title-row">
+        <small>
+          {gameplayPlacementTarget
+            ? "Clique dans la scene pour placer l'objet"
+            : "Deplace le fond ou les objets a la souris"}
+        </small>
       </div>
+      <SceneComposer
+        layout={block.sceneLayout}
+        bgSrc={assetPreviewSrcById[block.backgroundAssetId ?? ""]}
+        canEdit={canEdit}
+        onChange={(newLayout) => {
+          onUpdateSelectedBlock((b) =>
+            b.type === "gameplay" ? { ...b, sceneLayout: newLayout } : b,
+          );
+        }}
+        sceneClassName="pointclick-editor-scene"
+        onSceneClick={onGameplaySceneClick}
+        onScenePointerMove={onGameplayScenePointerMove}
+        onScenePointerUp={onGameplayScenePointerEnd}
+        onScenePointerCancel={onGameplayScenePointerEnd}
+      >
+        {[...block.objects]
+          .sort((a, b) => a.zIndex - b.zIndex)
+          .map((obj) => (
+            <div
+              key={obj.id}
+              className={`pointclick-overlay-box ${
+                gameplayPlacementTarget?.objectId === obj.id ? "pointclick-overlay-active" : ""
+              } pointclick-type-${obj.objectType}`}
+              style={{
+                left: `${obj.x}%`,
+                top: `${obj.y}%`,
+                width: `${obj.width}%`,
+                height: `${obj.height}%`,
+                zIndex: obj.zIndex + 10,
+                backgroundImage: assetPreviewSrcById[obj.assetId ?? ""]
+                  ? `url(${assetPreviewSrcById[obj.assetId ?? ""]})`
+                  : undefined,
+                opacity: obj.visibleByDefault ? 1 : 0.45,
+              }}
+              onPointerDown={(event) => onStartGameplayObjectDrag(event, obj.id)}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {!assetPreviewSrcById[obj.assetId ?? ""] && <span>{obj.name || "Objet"}</span>}
+              {canEdit && (
+                <div
+                  className="pointclick-resize-handle"
+                  onPointerDown={(event) => { event.stopPropagation(); onStartGameplayObjectResize(event, obj.id); }}
+                />
+              )}
+            </div>
+          ))}
+
+        {/* SVG arrows from key center → lock center */}
+        <svg className="pointclick-arrows-svg">
+          {keyLockPairs.map(({ key: k, lock: l }) => {
+            const kx = k.x + k.width / 2;
+            const ky = k.y + k.height / 2;
+            const lx = l.x + l.width / 2;
+            const ly = l.y + l.height / 2;
+            return (
+              <line
+                key={`${k.id}-${l.id}`}
+                x1={`${kx}%`} y1={`${ky}%`}
+                x2={`${lx}%`} y2={`${ly}%`}
+                stroke="#f59e0b"
+                strokeWidth="2"
+                strokeDasharray="6 4"
+                markerEnd="url(#arrowhead)"
+              />
+            );
+          })}
+          <defs>
+            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" />
+            </marker>
+          </defs>
+        </svg>
+      </SceneComposer>
 
       {/* ── Ambiance ── */}
       <label>
@@ -2345,6 +2530,7 @@ export function AuthorStudioBlockEditorPanel({
   blocks,
   visibleIssues,
   onDeleteSelectedBlock,
+  onDuplicateSelectedBlock,
   onRunValidation,
   onSetStartBlock,
   onSetSelectedDynamicField,
@@ -2392,6 +2578,7 @@ export function AuthorStudioBlockEditorPanel({
   gameplayPlacementTarget,
   onSetGameplayPlacementTarget,
   onStartGameplayObjectDrag,
+  onStartGameplayObjectResize,
   onGameplaySceneClick,
   onGameplayScenePointerMove,
   onGameplayScenePointerEnd,
@@ -2411,13 +2598,22 @@ export function AuthorStudioBlockEditorPanel({
               branchements et effets.
             </HelpHint>
           </div>
-          <button
-            className="button-danger"
-            onClick={onDeleteSelectedBlock}
-            disabled={!selectedBlock || !canEdit}
-          >
-            Supprimer
-          </button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className="button-secondary"
+              onClick={onDuplicateSelectedBlock}
+              disabled={!selectedBlock || !canEdit}
+            >
+              Dupliquer
+            </button>
+            <button
+              className="button-danger"
+              onClick={onDeleteSelectedBlock}
+              disabled={!selectedBlock || !canEdit}
+            >
+              Supprimer
+            </button>
+          </div>
         </div>
 
         {!selectedBlock && (
@@ -2566,6 +2762,8 @@ export function AuthorStudioBlockEditorPanel({
                 onAddResponseEffect={onAddResponseEffect}
                 onUpdateResponseEffect={onUpdateResponseEffect}
                 onRemoveResponseEffect={onRemoveResponseEffect}
+                onRegisterAsset={onRegisterAsset}
+                onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
                 onStatusMessage={onStatusMessage}
               />
             )}
@@ -2637,6 +2835,7 @@ export function AuthorStudioBlockEditorPanel({
                 gameplayPlacementTarget={gameplayPlacementTarget}
                 onSetGameplayPlacementTarget={onSetGameplayPlacementTarget}
                 onStartGameplayObjectDrag={onStartGameplayObjectDrag}
+                onStartGameplayObjectResize={onStartGameplayObjectResize}
                 onGameplaySceneClick={onGameplaySceneClick}
                 onGameplayScenePointerMove={onGameplayScenePointerMove}
                 onGameplayScenePointerEnd={onGameplayScenePointerEnd}

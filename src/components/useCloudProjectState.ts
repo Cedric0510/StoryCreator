@@ -172,15 +172,16 @@ export function useCloudProjectState(setStatusMessage: (message: string) => void
       }
     });
 
-    // Proactively refresh the session when the tab becomes visible again.
-    // This covers cases where the computer went to sleep or the tab was
-    // in the background long enough for the JWT to expire without being
-    // auto-refreshed by the internal timer.
+    // Restart / pause the auto-refresh timer when the tab visibility changes.
+    // Using startAutoRefresh/stopAutoRefresh (non-blocking) instead of
+    // refreshSession() avoids holding Supabase's internal auth lock, which
+    // would otherwise block user-initiated operations (e.g. save) that also
+    // call refreshSession() — causing cloudBusy to appear stuck.
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        supabase.auth.refreshSession().catch(() => {
-          /* swallow — onAuthStateChange will handle SIGNED_OUT if needed */
-        });
+        supabase.auth.startAutoRefresh();
+      } else {
+        supabase.auth.stopAutoRefresh();
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);

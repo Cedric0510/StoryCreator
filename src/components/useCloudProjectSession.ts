@@ -227,14 +227,14 @@ export function useCloudProjectSession({
           if (!silent) {
             setStatusMessage("Verrou cloud indisponible: un autre auteur edite ce projet.");
           }
-          await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+          void refreshCloudSideData(cloudProjectId, cloudOwnerId);
           return false;
         }
 
         setCloudEditingLockUserId(authUser.id);
-        await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+        void refreshCloudSideData(cloudProjectId, cloudOwnerId);
         if (!silent) {
-          await appendCloudLog(cloudProjectId, "lock_acquire_cloud", "Verrou cloud pris");
+          void appendCloudLog(cloudProjectId, "lock_acquire_cloud", "Verrou cloud pris");
         }
         return true;
       } catch (err: unknown) {
@@ -281,14 +281,14 @@ export function useCloudProjectSession({
           if (!silent) {
             setStatusMessage("Liberation verrou cloud refusee.");
           }
-          await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+          void refreshCloudSideData(cloudProjectId, cloudOwnerId);
           return false;
         }
 
         setCloudEditingLockUserId(null);
-        await refreshCloudSideData(cloudProjectId, cloudOwnerId);
+        void refreshCloudSideData(cloudProjectId, cloudOwnerId);
         if (!silent) {
-          await appendCloudLog(cloudProjectId, "lock_release_cloud", "Verrou cloud libere");
+          void appendCloudLog(cloudProjectId, "lock_release_cloud", "Verrou cloud libere");
         }
         return true;
       } catch (err: unknown) {

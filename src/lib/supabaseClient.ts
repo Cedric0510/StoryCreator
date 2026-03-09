@@ -8,6 +8,12 @@ let cachedClient: SupabaseClient | null = null;
  */
 const SUPABASE_FETCH_TIMEOUT_MS = 30_000;
 
+/**
+ * Longer timeout for Storage blob downloads (large images / audio).
+ * Regular API calls keep the 30 s cap.
+ */
+const SUPABASE_STORAGE_TIMEOUT_MS = 120_000;
+
 function fetchWithTimeout(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -26,9 +32,14 @@ function fetchWithTimeout(
     }
   }
 
+  // Use a longer timeout for Storage blob endpoints (download / upload).
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+  const isStorageBlob = /\/storage\/v1\/object\//.test(url);
+  const timeoutMs = isStorageBlob ? SUPABASE_STORAGE_TIMEOUT_MS : SUPABASE_FETCH_TIMEOUT_MS;
+
   const timeout = setTimeout(
-    () => controller.abort(new Error("Requete Supabase timeout (30 s)")),
-    SUPABASE_FETCH_TIMEOUT_MS,
+    () => controller.abort(new Error(`Requete Supabase timeout (${timeoutMs / 1000} s)`)),
+    timeoutMs,
   );
 
   return fetch(input, { ...init, signal: controller.signal }).finally(() =>

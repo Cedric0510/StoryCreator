@@ -123,16 +123,29 @@ function GameplayPreviewScene({
     [block.objects, dragKey, onDropKeyOnLock, previewState],
   );
 
+  const sl = block.sceneLayout;
+
   return (
     <div
       ref={sceneRef}
       className="preview-vn-gameplay-scene"
-      style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      {!bgSrc && (
+      {bgSrc ? (
+        <img
+          className="preview-vn-bg-layer"
+          src={bgSrc}
+          alt=""
+          style={{
+            left: `${sl.background.x}%`,
+            top: `${sl.background.y}%`,
+            width: `${sl.background.width}%`,
+            height: `${sl.background.height}%`,
+          }}
+        />
+      ) : (
         <div className="pointclick-editor-empty-bg">Fond gameplay manquant</div>
       )}
 
@@ -327,8 +340,6 @@ export function PreviewOverlay({
           {/* ── DIALOGUE ── */}
           {previewBlock?.type === "dialogue" && (() => {
             const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
-            const charSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
-            const npcImgSrc = assetPreviewSrcById[previewBlock.npcImageAssetId ?? ""];
 
             const linkedNpc =
               previewBlock.npcProfileBlockId
@@ -356,8 +367,16 @@ export function PreviewOverlay({
                 : currentLine.speaker;
 
             const voiceSrc = assetPreviewSrcById[currentLine.voiceAssetId ?? ""];
-            const portraitSrc = npcImgSrc || charSrc;
             const sl = previewBlock.sceneLayout;
+
+            // Multi-character layers sorted by zIndex (higher zIndex = further back)
+            const charLayers = (previewBlock.characterLayers ?? [])
+              .map((layer) => ({
+                ...layer,
+                src: assetPreviewSrcById[layer.assetId ?? ""],
+              }))
+              .filter((l) => l.src)
+              .sort((a, b) => b.zIndex - a.zIndex);
 
             return (
               <div className="preview-vn-scene">
@@ -376,20 +395,22 @@ export function PreviewOverlay({
                   />
                 )}
 
-                {/* Character portrait — positioned via sceneLayout */}
-                {portraitSrc && (
+                {/* Character layers — each with own layout and z-order */}
+                {charLayers.map((layer) => (
                   <img
+                    key={layer.id}
                     className="preview-vn-char-layer"
-                    src={portraitSrc}
-                    alt={speakerName || "Personnage"}
+                    src={layer.src}
+                    alt={layer.label}
                     style={{
-                      left: `${sl.character.x}%`,
-                      top: `${sl.character.y}%`,
-                      width: `${sl.character.width}%`,
-                      height: `${sl.character.height}%`,
+                      left: `${layer.layout.x}%`,
+                      top: `${layer.layout.y}%`,
+                      width: `${layer.layout.width}%`,
+                      height: `${layer.layout.height}%`,
+                      zIndex: 10 - layer.zIndex,
                     }}
                   />
-                )}
+                ))}
 
                 {/* Voice audio */}
                 {voiceSrc && (

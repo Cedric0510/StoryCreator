@@ -281,6 +281,8 @@ describe("story dialogue block (multi-line)", () => {
       background: { x: 0, y: 0, width: 100, height: 100 },
       character: { x: 25, y: 10, width: 50, height: 80 },
     });
+    // characterLayers defaults
+    expect(block.characterLayers).toEqual([]);
   });
 
   it("normalizes old v1 dialogue format to multi-line v2", () => {
@@ -324,6 +326,8 @@ describe("story dialogue block (multi-line)", () => {
       background: { x: 0, y: 0, width: 100, height: 100 },
       character: { x: 25, y: 10, width: 50, height: 80 },
     });
+    // characterLayers migrated (both null -> empty)
+    expect(dBlock.characterLayers).toEqual([]);
   });
 
   it("reports empty dialogue lines as error", () => {
