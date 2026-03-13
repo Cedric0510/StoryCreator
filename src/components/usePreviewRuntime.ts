@@ -21,6 +21,8 @@ export interface PreviewRuntimeState {
   gameplayInteractedObjectIds: string[];
   /** Runtime visibility of gameplay objects (false = hidden) */
   gameplayObjectVisibility: Record<string, boolean>;
+  /** Press history for button sequence gameplay. */
+  gameplayButtonSequenceInput: string[];
   gameplayMessage: string | null;
 }
 
@@ -54,7 +56,7 @@ function resolveDialogueLine(
   const line = block.lines.find((l) => l.id === targetLineId);
   if (!line) return targetLineId;
   if (lineConditionsMet(line, npcAffinity)) return targetLineId;
-  // Condition failed — use fallback
+  // Condition failed â€” use fallback
   if (!line.fallbackLineId) return null; // skip line entirely
   const seen = visited ?? new Set<string>();
   if (seen.has(line.fallbackLineId)) return null; // prevent infinite loops
@@ -87,6 +89,7 @@ export function usePreviewRuntime({
         ended: true,
         gameplayInteractedObjectIds: [],
         gameplayObjectVisibility: {},
+        gameplayButtonSequenceInput: [],
         gameplayMessage: null,
       });
 
@@ -147,6 +150,7 @@ export function usePreviewRuntime({
           ended: false,
           gameplayInteractedObjectIds: [],
           gameplayObjectVisibility: {},
+          gameplayButtonSequenceInput: [],
           gameplayMessage: null,
         } as PreviewRuntimeState;
       }
@@ -161,11 +165,12 @@ export function usePreviewRuntime({
           ended: false,
           gameplayInteractedObjectIds: [],
           gameplayObjectVisibility: {},
+          gameplayButtonSequenceInput: [],
           gameplayMessage: null,
         } as PreviewRuntimeState;
       }
 
-      // Gameplay block — initialise object visibility
+      // Gameplay block â€” initialise object visibility
       const visibility: Record<string, boolean> = {};
       for (const obj of block.objects) {
         visibility[obj.id] = obj.visibleByDefault;
@@ -180,6 +185,7 @@ export function usePreviewRuntime({
         ended: false,
         gameplayInteractedObjectIds: [],
         gameplayObjectVisibility: visibility,
+        gameplayButtonSequenceInput: [],
         gameplayMessage: null,
       } as PreviewRuntimeState;
     },
@@ -229,11 +235,17 @@ export function usePreviewRuntime({
 
   const previewGameplayProgressLabel = useMemo(() => {
     if (!previewBlock || previewBlock.type !== "gameplay") return "";
+    const hasButtons = previewBlock.objects.some((obj) => obj.objectType === "button");
+    if (hasButtons) {
+      const expectedLength = previewBlock.buttonSequence.length;
+      if (expectedLength <= 0) return "Sequence non definie";
+      return `Code ${previewState?.gameplayButtonSequenceInput.length ?? 0}/${expectedLength}`;
+    }
     const interactive = interactiveObjectIds(previewBlock);
     if (interactive.length === 0) return "Aucun objet interactif";
     const done = interactive.filter((id) => previewInteractedSet.has(id)).length;
     return `${done}/${interactive.length} objets`;
-  }, [previewBlock, previewInteractedSet]);
+  }, [previewBlock, previewInteractedSet, previewState?.gameplayButtonSequenceInput.length]);
 
   const continuePreview = useCallback(() => {
     if (!previewState || !previewBlock) return;
@@ -362,7 +374,58 @@ export function usePreviewRuntime({
       }
 
       if (obj.objectType === "key") {
-        // Keys are dragged, not clicked — no action on click
+        // Keys are dragged, not clicked â€” no action on click
+        return;
+      }
+
+      if (obj.objectType === "button") {
+        const expectedSequence = previewBlock.buttonSequence;
+        if (expectedSequence.length === 0) {
+          setPreviewState({
+            ...previewState,
+            gameplayMessage: "Sequence non definie.",
+            gameplayButtonSequenceInput: [],
+          });
+          return;
+        }
+
+        const nextInput = [...previewState.gameplayButtonSequenceInput, objectId]
+          .slice(0, expectedSequence.length);
+        const nextVariables = applyEffects(previewState.variables, obj.effects);
+        if (nextInput.length < expectedSequence.length) {
+          setPreviewState({
+            ...previewState,
+            variables: nextVariables,
+            gameplayButtonSequenceInput: nextInput,
+            gameplayMessage: "Code " + nextInput.length + "/" + expectedSequence.length,
+          });
+          return;
+        }
+
+        const isExactMatch = expectedSequence.every(
+          (buttonId, index) => nextInput[index] === buttonId,
+        );
+        if (isExactMatch) {
+          const completionVars = applyEffects(nextVariables, previewBlock.completionEffects);
+          setPreviewState(
+            buildPreviewState(
+              previewBlock.buttonSequenceSuccessBlockId,
+              completionVars,
+              previewState.inventory,
+              previewState.npcAffinity,
+            ),
+          );
+          return;
+        }
+
+        setPreviewState(
+          buildPreviewState(
+            previewBlock.buttonSequenceFailureBlockId,
+            nextVariables,
+            previewState.inventory,
+            previewState.npcAffinity,
+          ),
+        );
         return;
       }
 
@@ -375,7 +438,7 @@ export function usePreviewRuntime({
         return;
       }
     },
-    [previewBlock, previewState],
+    [buildPreviewState, previewBlock, previewState],
   );
 
   /** Handle dropping a key object onto a lock in preview */

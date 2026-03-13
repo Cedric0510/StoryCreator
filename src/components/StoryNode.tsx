@@ -86,6 +86,9 @@ function ChoiceOutputs({ block }: { block: ChoiceBlock }) {
 
 function GameplayOutputs({ block }: { block: GameplayBlock }) {
   const lockObjects = block.objects.filter((obj) => obj.objectType === "lock");
+  const hasButtons =
+    block.objects.some((obj) => obj.objectType === "button") ||
+    Boolean(block.buttonSequenceSuccessBlockId || block.buttonSequenceFailureBlockId);
 
   return (
     <div className="story-node-dialogue-outputs">
@@ -101,6 +104,30 @@ function GameplayOutputs({ block }: { block: GameplayBlock }) {
           />
         </div>
       ))}
+      {hasButtons && (
+        <>
+          <div className="story-node-choice-row">
+            <span className="story-node-choice-label">OK</span>
+            <span className="story-node-choice-text">Sequence reussie</span>
+            <Handle
+              type="source"
+              id="button-seq-success"
+              position={Position.Right}
+              className="story-node-handle"
+            />
+          </div>
+          <div className="story-node-choice-row">
+            <span className="story-node-choice-label">KO</span>
+            <span className="story-node-choice-text">Sequence echouee</span>
+            <Handle
+              type="source"
+              id="button-seq-failure"
+              position={Position.Right}
+              className="story-node-handle"
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

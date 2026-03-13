@@ -49,6 +49,8 @@ import {
   buildEdge,
   buildInitialStudio,
   choiceLabelFromHandle,
+  GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE,
+  GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE,
   gameplayLockIdFromHandle,
   lineIdFromHandle,
   rebuildEdgesFromNodes,
@@ -977,6 +979,30 @@ export function AuthorStudioApp() {
 
           if (node.data.block.type === "gameplay") {
             const lockId = gameplayLockIdFromHandle(sourceHandle);
+            if (sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  block: {
+                    ...node.data.block,
+                    buttonSequenceSuccessBlockId: targetId,
+                  } as StoryBlock,
+                },
+              };
+            }
+            if (sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  block: {
+                    ...node.data.block,
+                    buttonSequenceFailureBlockId: targetId,
+                  } as StoryBlock,
+                },
+              };
+            }
             if (!lockId) {
               return {
                 ...node,
@@ -1301,6 +1327,13 @@ export function AuthorStudioApp() {
           obj.linkedKeyId = idMap.get(obj.linkedKeyId as string)!;
         }
       }
+      if (Array.isArray(clone.buttonSequence)) {
+        clone.buttonSequence = (clone.buttonSequence as string[])
+          .map((buttonId) => idMap.get(buttonId) ?? null)
+          .filter((buttonId): buttonId is string => Boolean(buttonId));
+      }
+      clone.buttonSequenceSuccessBlockId = null;
+      clone.buttonSequenceFailureBlockId = null;
       clone.nextBlockId = null;
     }
 
@@ -1459,6 +1492,26 @@ export function AuthorStudioApp() {
         }
 
       if (sourceNode.type === "gameplay") {
+        if (connection.sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE) {
+          setConnection(
+            connection.source,
+            GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE,
+            connection.target,
+            connection.targetHandle,
+          );
+          logAction("link", `${sourceNode.name} code OK -> ${connection.target}`);
+          return;
+        }
+        if (connection.sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE) {
+          setConnection(
+            connection.source,
+            GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE,
+            connection.target,
+            connection.targetHandle,
+          );
+          logAction("link", `${sourceNode.name} code KO -> ${connection.target}`);
+          return;
+        }
         const lockId = gameplayLockIdFromHandle(connection.sourceHandle);
         if (lockId) {
           const handle = `lock-${lockId}`;
@@ -1630,13 +1683,22 @@ export function AuthorStudioApp() {
   const removeGameplayObjectAndEdges = useCallback(
     (objectId: string) => {
       if (!selectedBlock || selectedBlock.type !== "gameplay") return;
+      const removedObject = selectedBlock.objects.find((obj) => obj.id === objectId) ?? null;
+      const removingLastButton =
+        removedObject?.objectType === "button" &&
+        selectedBlock.objects.filter((obj) => obj.objectType === "button").length <= 1;
       removeGameplayObject(objectId);
       setEdges((current) =>
         current.filter(
           (edge) =>
             !(
               edge.source === selectedBlock.id &&
-              (edge.sourceHandle ?? "") === `lock-${objectId}`
+              (
+                (edge.sourceHandle ?? "") === `lock-${objectId}` ||
+                (removingLastButton &&
+                  ((edge.sourceHandle ?? "") === GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE ||
+                    (edge.sourceHandle ?? "") === GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE))
+              )
             ),
         ),
       );

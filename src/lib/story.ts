@@ -1,4 +1,4 @@
-export const STORY_SCHEMA_VERSION = "1.5.0";
+export const STORY_SCHEMA_VERSION = "1.6.0";
 
 export type BlockType =
   | "title"
@@ -21,7 +21,8 @@ export type GameplayObjectType =
   | "decoration"    // Not interactive — just visual
   | "collectible"   // Goes to inventory on click
   | "key"           // Draggable — must be dropped on its linked lock
-  | "lock";         // Waits for its linked key, then triggers unlock effect
+  | "lock"          // Waits for its linked key, then triggers unlock effect
+  | "button";       // Clickable button used in an ordered sequence
 
 /** What happens when a lock is unlocked by its key. */
 export type GameplayUnlockEffect =
@@ -352,8 +353,14 @@ export interface GameplayBlock extends BaseBlock {
   backgroundAssetId: string | null;
   sceneLayout: SceneLayout;
   voiceAssetId: string | null;
-  /** V3: simplified objects with 4 types */
+  /** V3: simplified objects with 5 types */
   objects: GameplayObject[];
+  /** Expected button press order (button object IDs). */
+  buttonSequence: string[];
+  /** Target when the button sequence is entered correctly. */
+  buttonSequenceSuccessBlockId: string | null;
+  /** Target when the button sequence fails. */
+  buttonSequenceFailureBlockId: string | null;
   completionEffects: VariableEffect[];
   nextBlockId: string | null;
   /* ── Legacy fields (kept for migration, not used in V3 UI) ── */
@@ -486,6 +493,7 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
 };
 
 export const CHOICE_LABELS: ChoiceLabel[] = ["A", "B", "C", "D"];
+export const MAX_GAMEPLAY_BUTTONS = 5;
 
 function randomFragment() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -877,6 +885,9 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
     sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
     voiceAssetId: null,
     objects: [],
+    buttonSequence: [],
+    buttonSequenceSuccessBlockId: null,
+    buttonSequenceFailureBlockId: null,
     completionEffects: [],
     nextBlockId: null,
   };
@@ -905,7 +916,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
       height: Number.isFinite(obj.height) ? (obj.height as number) : 15,
       zIndex: Number.isFinite(obj.zIndex) ? (obj.zIndex as number) : 2,
       visibleByDefault: typeof obj.visibleByDefault === "boolean" ? obj.visibleByDefault : true,
-      objectType: (["decoration", "collectible", "key", "lock"] as string[]).includes(obj.objectType as string)
+      objectType: (["decoration", "collectible", "key", "lock", "button"] as string[]).includes(obj.objectType as string)
         ? (obj.objectType as GameplayObjectType)
         : "decoration",
       grantItemId: typeof obj.grantItemId === "string" && obj.grantItemId ? obj.grantItemId : null,
@@ -1036,6 +1047,31 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
     }
   }
 
+  const orderedButtonIds = objects
+    .filter((obj) => obj.objectType === "button")
+    .map((obj) => obj.id);
+  const buttonIds = new Set(orderedButtonIds);
+  const rawButtonSequence = Array.isArray(raw.buttonSequence) ? raw.buttonSequence : [];
+  const seenButtonIds = new Set<string>();
+  const explicitButtonSequence = rawButtonSequence
+    .filter((value): value is string => typeof value === "string" && buttonIds.has(value))
+    .filter((buttonId) => {
+      if (seenButtonIds.has(buttonId)) return false;
+      seenButtonIds.add(buttonId);
+      return true;
+    })
+    .slice(0, MAX_GAMEPLAY_BUTTONS);
+  const missingButtonIds = orderedButtonIds.filter((buttonId) => !seenButtonIds.has(buttonId));
+  const buttonSequence = [...explicitButtonSequence, ...missingButtonIds].slice(0, MAX_GAMEPLAY_BUTTONS);
+  const buttonSequenceSuccessBlockId =
+    typeof raw.buttonSequenceSuccessBlockId === "string" && raw.buttonSequenceSuccessBlockId
+      ? raw.buttonSequenceSuccessBlockId
+      : null;
+  const buttonSequenceFailureBlockId =
+    typeof raw.buttonSequenceFailureBlockId === "string" && raw.buttonSequenceFailureBlockId
+      ? raw.buttonSequenceFailureBlockId
+      : null;
+
   return {
     ...block,
     entryEffects: normalizeVariableEffects(raw.entryEffects),
@@ -1045,6 +1081,9 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
     sceneLayout: normalizeSceneLayout(raw.sceneLayout),
     voiceAssetId: block.voiceAssetId ?? null,
     objects,
+    buttonSequence,
+    buttonSequenceSuccessBlockId,
+    buttonSequenceFailureBlockId,
     completionEffects: normalizeVariableEffects(block.completionEffects),
     nextBlockId: block.nextBlockId ?? null,
     // Clear all legacy fields
@@ -1269,7 +1308,13 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
       .filter((obj) => obj.objectType === "lock" && obj.unlockEffect === "go_to_next")
       .map((obj) => obj.targetBlockId)
       .filter((targetId): targetId is string => Boolean(targetId));
-    const targets = block.nextBlockId ? [block.nextBlockId, ...lockTargets] : lockTargets;
+    const sequenceTargets = [
+      block.buttonSequenceSuccessBlockId,
+      block.buttonSequenceFailureBlockId,
+    ].filter((targetId): targetId is string => Boolean(targetId));
+    const targets = block.nextBlockId
+      ? [block.nextBlockId, ...lockTargets, ...sequenceTargets]
+      : [...lockTargets, ...sequenceTargets];
     return Array.from(new Set(targets));
   }
 
@@ -1536,6 +1581,76 @@ export function validateStoryBlocks(
       }
 
       const objectIds = new Set(block.objects.map((o) => o.id));
+      const buttonObjects = block.objects.filter((o) => o.objectType === "button");
+      const buttonIds = new Set(buttonObjects.map((o) => o.id));
+
+      if (buttonObjects.length > MAX_GAMEPLAY_BUTTONS) {
+        issues.push({
+          level: "error",
+          message: `Le systeme de code accepte au maximum ${MAX_GAMEPLAY_BUTTONS} boutons.`,
+          blockId: block.id,
+        });
+      }
+
+      if (buttonObjects.length > 0 && block.buttonSequence.length === 0) {
+        issues.push({
+          level: "warning",
+          message: "Definis une sequence de boutons pour le code.",
+          blockId: block.id,
+        });
+      }
+      if (
+        buttonObjects.length > 0 &&
+        block.buttonSequence.length > 0 &&
+        block.buttonSequence.length !== buttonObjects.length
+      ) {
+        issues.push({
+          level: "warning",
+          message: "Chaque bouton doit avoir une position dans la sequence.",
+          blockId: block.id,
+        });
+      }
+
+      for (const buttonId of block.buttonSequence) {
+        if (!buttonIds.has(buttonId)) {
+          issues.push({
+            level: "error",
+            message: "La sequence contient un bouton supprime ou invalide.",
+            blockId: block.id,
+          });
+          break;
+        }
+      }
+
+      if (buttonObjects.length > 0 && !block.buttonSequenceSuccessBlockId) {
+        issues.push({
+          level: "warning",
+          message: "Definis une sortie reussite pour la sequence de boutons.",
+          blockId: block.id,
+        });
+      }
+      if (buttonObjects.length > 0 && !block.buttonSequenceFailureBlockId) {
+        issues.push({
+          level: "warning",
+          message: "Definis une sortie echec pour la sequence de boutons.",
+          blockId: block.id,
+        });
+      }
+      if (block.buttonSequenceSuccessBlockId && !blockById.has(block.buttonSequenceSuccessBlockId)) {
+        issues.push({
+          level: "error",
+          message: "La sortie reussite de sequence pointe vers un bloc supprime.",
+          blockId: block.id,
+        });
+      }
+      if (block.buttonSequenceFailureBlockId && !blockById.has(block.buttonSequenceFailureBlockId)) {
+        issues.push({
+          level: "error",
+          message: "La sortie echec de sequence pointe vers un bloc supprime.",
+          blockId: block.id,
+        });
+      }
+
       for (const obj of block.objects) {
         if (obj.objectType === "collectible" && obj.grantItemId && !itemIds.has(obj.grantItemId)) {
           issues.push({

@@ -16,6 +16,9 @@ describe("story gameplay schema", () => {
     const block = createBlock("gameplay", { x: 100, y: 120 }) as GameplayBlock;
 
     expect(block.objects).toEqual([]);
+    expect(block.buttonSequence).toEqual([]);
+    expect(block.buttonSequenceSuccessBlockId).toBeNull();
+    expect(block.buttonSequenceFailureBlockId).toBeNull();
     expect(block.completionEffects).toEqual([]);
     expect(block.nextBlockId).toBeNull();
   });
@@ -32,6 +35,77 @@ describe("story gameplay schema", () => {
 
     expect(normalized.objects).toEqual([]);
     expect(normalized.completionEffects).toEqual([]);
+  });
+
+  it("auto-completes button sequence with missing button ids", () => {
+    const gameplay = createBlock("gameplay", { x: 0, y: 0 }) as GameplayBlock;
+    gameplay.objects = [
+      {
+        id: "btn-1",
+        name: "Bouton 1",
+        assetId: null,
+        soundAssetId: null,
+        x: 10,
+        y: 10,
+        width: 10,
+        height: 10,
+        zIndex: 1,
+        visibleByDefault: true,
+        objectType: "button",
+        grantItemId: null,
+        linkedKeyId: null,
+        targetBlockId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+      {
+        id: "btn-2",
+        name: "Bouton 2",
+        assetId: null,
+        soundAssetId: null,
+        x: 20,
+        y: 10,
+        width: 10,
+        height: 10,
+        zIndex: 1,
+        visibleByDefault: true,
+        objectType: "button",
+        grantItemId: null,
+        linkedKeyId: null,
+        targetBlockId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+      {
+        id: "btn-3",
+        name: "Bouton 3",
+        assetId: null,
+        soundAssetId: null,
+        x: 30,
+        y: 10,
+        width: 10,
+        height: 10,
+        zIndex: 1,
+        visibleByDefault: true,
+        objectType: "button",
+        grantItemId: null,
+        linkedKeyId: null,
+        targetBlockId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
+    gameplay.buttonSequence = ["btn-2"];
+
+    const normalized = normalizeGameplayBlock(gameplay);
+
+    expect(normalized.buttonSequence).toEqual(["btn-2", "btn-1", "btn-3"]);
   });
 
   it("reports gameplay validation issues for empty objects", () => {
@@ -219,6 +293,71 @@ describe("story gameplay schema", () => {
 
     expect(outgoing).toContain("fallback-block");
     expect(outgoing).toContain("success-block");
+  });
+
+  it("includes button sequence success/failure targets in gameplay outgoing links", () => {
+    const gameplay = createBlock("gameplay", { x: 20, y: 20 }) as GameplayBlock;
+    gameplay.objects = [
+      {
+        id: "btn-1",
+        name: "Bouton 1",
+        assetId: null,
+        soundAssetId: null,
+        x: 20, y: 20, width: 12, height: 12, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "button",
+        grantItemId: null,
+        linkedKeyId: null,
+        targetBlockId: null,
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
+    gameplay.buttonSequence = ["btn-1"];
+    gameplay.buttonSequenceSuccessBlockId = "code-ok";
+    gameplay.buttonSequenceFailureBlockId = "code-ko";
+
+    const outgoing = getBlockOutgoingTargets(gameplay);
+
+    expect(outgoing).toContain("code-ok");
+    expect(outgoing).toContain("code-ko");
+  });
+
+  it("reports an error when gameplay contains more than 5 buttons", () => {
+    const title = createBlock("title", { x: 0, y: 0 });
+    const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
+    gameplay.objects = Array.from({ length: 11 }).map((_, index) => ({
+      id: `btn-${index}`,
+      name: `Bouton ${index + 1}`,
+      assetId: null,
+      soundAssetId: null,
+      x: 10,
+      y: 10,
+      width: 10,
+      height: 10,
+      zIndex: 1,
+      visibleByDefault: true,
+      objectType: "button" as const,
+      grantItemId: null,
+      linkedKeyId: null,
+      targetBlockId: null,
+      unlockEffect: "go_to_next" as const,
+      lockedMessage: "",
+      successMessage: "",
+      effects: [],
+    }));
+
+    const issues = validateStoryBlocks([title, gameplay], title.id);
+    expect(
+      issues.some(
+        (issue) =>
+          issue.level === "error" &&
+          issue.blockId === gameplay.id &&
+          issue.message.includes("5 boutons"),
+      ),
+    ).toBe(true);
   });
 
   it("normalizes gameplay lock targetBlockId to null when malformed", () => {

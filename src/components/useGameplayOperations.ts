@@ -12,6 +12,7 @@ import {
 import {
   GameplayBlock,
   GameplayObject,
+  MAX_GAMEPLAY_BUTTONS,
   StoryBlock,
   defaultGameplayObject,
 } from "@/lib/story";
@@ -101,15 +102,28 @@ export function useGameplayOperations({
   const removeGameplayObject = useCallback((objectId: string) => {
     updateSelectedBlock((b) => {
       if (b.type !== "gameplay") return b;
+      const nextObjects = b.objects
+        .filter((o) => o.id !== objectId)
+        .map((o) =>
+          o.objectType === "lock" && o.linkedKeyId === objectId
+            ? { ...o, linkedKeyId: null }
+            : o,
+        );
+      const nextButtonIds = new Set(
+        nextObjects.filter((o) => o.objectType === "button").map((o) => o.id),
+      );
+      const nextButtonSequence = (b.buttonSequence ?? [])
+        .filter((buttonId) => buttonId !== objectId && nextButtonIds.has(buttonId))
+        .slice(0, MAX_GAMEPLAY_BUTTONS);
+
       return {
         ...b,
-        objects: b.objects
-          .filter((o) => o.id !== objectId)
-          .map((o) =>
-            o.objectType === "lock" && o.linkedKeyId === objectId
-              ? { ...o, linkedKeyId: null }
-              : o,
-          ),
+        objects: nextObjects,
+        buttonSequence: nextButtonSequence,
+        buttonSequenceSuccessBlockId:
+          nextButtonIds.size > 0 ? b.buttonSequenceSuccessBlockId : null,
+        buttonSequenceFailureBlockId:
+          nextButtonIds.size > 0 ? b.buttonSequenceFailureBlockId : null,
       };
     });
   }, [updateSelectedBlock]);

@@ -66,13 +66,25 @@ export function gameplayLockIdFromHandle(handle: string | null | undefined): str
   return match ? match[1] : null;
 }
 
+export const GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE = "button-seq-success";
+export const GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE = "button-seq-failure";
+
 export function buildEdge(source: string, target: string, sourceHandle: string, label?: string, targetHandle?: string): EditorEdge {
   const lockId = gameplayLockIdFromHandle(sourceHandle);
+  const isButtonSequenceSuccess = sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE;
+  const isButtonSequenceFailure = sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE;
   const derivedLabel =
     label ??
     (sourceHandle === "npc-link"
       ? "PNJ"
-      : choiceLabelFromHandle(sourceHandle) ?? (lockId ? "Serrure" : undefined));
+      : choiceLabelFromHandle(sourceHandle)
+        ?? (lockId
+          ? "Serrure"
+          : isButtonSequenceSuccess
+            ? "Code OK"
+            : isButtonSequenceFailure
+              ? "Code KO"
+              : undefined));
   const isNpcLink = sourceHandle === "npc-link";
   const isSelfEdge = source === target;
 
@@ -146,6 +158,26 @@ export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
         if (!lock.targetBlockId) continue;
         const lockLabel = lock.name.trim() || `Serrure ${index + 1}`;
         edges.push(buildEdge(block.id, lock.targetBlockId, `lock-${lock.id}`, lockLabel));
+      }
+      if (block.buttonSequenceSuccessBlockId) {
+        edges.push(
+          buildEdge(
+            block.id,
+            block.buttonSequenceSuccessBlockId,
+            GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE,
+            "Code OK",
+          ),
+        );
+      }
+      if (block.buttonSequenceFailureBlockId) {
+        edges.push(
+          buildEdge(
+            block.id,
+            block.buttonSequenceFailureBlockId,
+            GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE,
+            "Code KO",
+          ),
+        );
       }
     } else if (block.type !== "hero_profile" && block.type !== "npc_profile") {
       if (block.nextBlockId) {
@@ -332,7 +364,7 @@ export function defaultGameplayHotspotActionDraft(
 /** V3: IDs of objects that are interactive (not "decoration"). */
 export function interactiveObjectIds(block: GameplayBlock): string[] {
   return block.objects
-    .filter((obj) => obj.objectType !== "decoration")
+    .filter((obj) => obj.objectType !== "decoration" && obj.objectType !== "button")
     .map((obj) => obj.id);
 }
 
@@ -348,6 +380,7 @@ export function requiredHotspotIds(block: GameplayBlock) {
 
 export function isGameplayCompleted(block: GameplayBlock, interactedObjectIds: Set<string>) {
   if (block.objects.length === 0) return true;
+  if (block.objects.some((obj) => obj.objectType === "button")) return false;
   const mustInteract = interactiveObjectIds(block);
   return mustInteract.every((id) => interactedObjectIds.has(id));
 }
@@ -481,6 +514,14 @@ export function removeNodeReferences(block: StoryBlock, removedBlockId: string):
     return {
       ...block,
       nextBlockId: block.nextBlockId === removedBlockId ? null : block.nextBlockId,
+      buttonSequenceSuccessBlockId:
+        block.buttonSequenceSuccessBlockId === removedBlockId
+          ? null
+          : block.buttonSequenceSuccessBlockId,
+      buttonSequenceFailureBlockId:
+        block.buttonSequenceFailureBlockId === removedBlockId
+          ? null
+          : block.buttonSequenceFailureBlockId,
       objects: block.objects.map((obj) =>
         obj.targetBlockId === removedBlockId ? { ...obj, targetBlockId: null } : obj,
       ),
@@ -801,6 +842,9 @@ export function serializeBlock(
       imagePath: assetPath(obj.assetId, assetRefs),
       effects: serializeEffects(obj.effects, variableNameById),
     })),
+    buttonSequence: block.buttonSequence,
+    buttonSequenceSuccessBlockId: block.buttonSequenceSuccessBlockId,
+    buttonSequenceFailureBlockId: block.buttonSequenceFailureBlockId,
     completionEffects: serializeEffects(block.completionEffects, variableNameById),
     nextBlockId: block.nextBlockId,
   };
@@ -1067,6 +1111,13 @@ export function deserializeBlockFromExport(
       sceneLayout: raw.sceneLayout,
       voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
       objects,
+      buttonSequence: Array.isArray(raw.buttonSequence)
+        ? raw.buttonSequence.filter((value): value is string => typeof value === "string")
+        : [],
+      buttonSequenceSuccessBlockId:
+        typeof raw.buttonSequenceSuccessBlockId === "string" ? raw.buttonSequenceSuccessBlockId : null,
+      buttonSequenceFailureBlockId:
+        typeof raw.buttonSequenceFailureBlockId === "string" ? raw.buttonSequenceFailureBlockId : null,
       links: rawLinks,
       completionEffects: deserializeEffects(raw.completionEffects),
       nextBlockId: (raw.nextBlockId as string) ?? null,
