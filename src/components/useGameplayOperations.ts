@@ -7,10 +7,6 @@ import {
 } from "react";
 
 import {
-  clampPercent,
-  normalizeRectPercent,
-} from "@/components/author-studio-core";
-import {
   GameplayPlacementTarget,
 } from "@/components/author-studio-types";
 import {
@@ -23,6 +19,20 @@ import {
 /* ------------------------------------------------------------------ */
 /*  Internal types                                                     */
 /* ------------------------------------------------------------------ */
+
+const MIN_GAMEPLAY_OBJECT_SIZE_PERCENT = 5;
+
+function sanitizePercent(value: number, fallback: number) {
+  if (!Number.isFinite(value) || Number.isNaN(value)) return fallback;
+  return Number(value.toFixed(2));
+}
+
+function sanitizeGameplaySize(value: number, fallback: number) {
+  return Math.max(
+    MIN_GAMEPLAY_OBJECT_SIZE_PERCENT,
+    sanitizePercent(value, Math.max(MIN_GAMEPLAY_OBJECT_SIZE_PERCENT, fallback)),
+  );
+}
 
 interface GameplayDragState {
   objectId: string;
@@ -128,8 +138,13 @@ export function useGameplayOperations({
     (objectId: string, field: "x" | "y" | "width" | "height", value: number) => {
       updateGameplayObject(objectId, (obj) => {
         const updated = { ...obj, [field]: value };
-        const rect = normalizeRectPercent(updated);
-        return { ...obj, ...rect };
+        return {
+          ...obj,
+          x: sanitizePercent(updated.x, obj.x),
+          y: sanitizePercent(updated.y, obj.y),
+          width: sanitizeGameplaySize(updated.width, obj.width),
+          height: sanitizeGameplaySize(updated.height, obj.height),
+        };
       });
     },
     [updateGameplayObject],
@@ -226,8 +241,8 @@ export function useGameplayOperations({
     (objectId: string, x: number, y: number) => {
       updateGameplayObject(objectId, (obj) => ({
         ...obj,
-        x: clampPercent(x),
-        y: clampPercent(y),
+        x: sanitizePercent(x, obj.x),
+        y: sanitizePercent(y, obj.y),
       }));
     },
     [updateGameplayObject],
@@ -326,12 +341,12 @@ export function useGameplayOperations({
       // resize: offset stores the pointer start position in %
       const dxPercent = xPercent - gameplayDragState.offsetX;
       const dyPercent = yPercent - gameplayDragState.offsetY;
-      const newW = Math.max(3, gameplayDragState.origWidth + dxPercent);
-      const newH = Math.max(3, gameplayDragState.origHeight + dyPercent);
+      const newW = gameplayDragState.origWidth + dxPercent;
+      const newH = gameplayDragState.origHeight + dyPercent;
       updateGameplayObject(gameplayDragState.objectId, (obj) => ({
         ...obj,
-        width: clampPercent(newW),
-        height: clampPercent(newH),
+        width: sanitizeGameplaySize(newW, obj.width),
+        height: sanitizeGameplaySize(newH, obj.height),
       }));
     }
     event.preventDefault();
@@ -352,8 +367,8 @@ export function useGameplayOperations({
     const rect = container.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
 
-    const xPercent = clampPercent(((event.clientX - rect.left) / rect.width) * 100);
-    const yPercent = clampPercent(((event.clientY - rect.top) / rect.height) * 100);
+    const xPercent = ((event.clientX - rect.left) / rect.width) * 100;
+    const yPercent = ((event.clientY - rect.top) / rect.height) * 100;
 
     const obj = selectedBlock.objects.find((o) => o.id === gameplayPlacementTarget.objectId);
     if (!obj) return;

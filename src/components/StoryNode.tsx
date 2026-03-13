@@ -12,7 +12,7 @@ import {
 } from "@xyflow/react";
 
 import { HelpHint } from "@/components/HelpHint";
-import { BLOCK_LABELS, ChapterStartBlock, ChoiceBlock, DialogueBlock, StoryBlock, blockTypeColor } from "@/lib/story";
+import { BLOCK_LABELS, ChapterStartBlock, ChoiceBlock, DialogueBlock, GameplayBlock, StoryBlock, blockTypeColor } from "@/lib/story";
 
 export interface StoryNodeData {
   [key: string]: unknown;
@@ -75,6 +75,27 @@ function ChoiceOutputs({ block }: { block: ChoiceBlock }) {
           <Handle
             type="source"
             id={`choice-${option.label}`}
+            position={Position.Right}
+            className="story-node-handle"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GameplayOutputs({ block }: { block: GameplayBlock }) {
+  const lockObjects = block.objects.filter((obj) => obj.objectType === "lock");
+
+  return (
+    <div className="story-node-dialogue-outputs">
+      {lockObjects.map((lock, index) => (
+        <div key={lock.id} className="story-node-choice-row">
+          <span className="story-node-choice-label">S{index + 1}</span>
+          <span className="story-node-choice-text">{lock.name.trim() || `Serrure ${index + 1}`}</span>
+          <Handle
+            type="source"
+            id={`lock-${lock.id}`}
             position={Position.Right}
             className="story-node-handle"
           />
@@ -267,6 +288,8 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
         <DialogueOutputs block={data.block} />
       ) : data.block.type === "choice" ? (
         <ChoiceOutputs block={data.block} />
+      ) : data.block.type === "gameplay" ? (
+        <GameplayOutputs block={data.block} />
       ) : data.block.type === "npc_profile" ? (
         <NpcProfileOutput />
       ) : data.block.type === "hero_profile" ? (

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createBlock,
+  getBlockOutgoingTargets,
   normalizeGameplayBlock,
   normalizeStoryBlock,
   validateStoryBlocks,
@@ -67,6 +68,7 @@ describe("story gameplay schema", () => {
         objectType: "lock",
         grantItemId: null,
         linkedKeyId: "key_missing",
+        targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
         successMessage: "",
@@ -101,6 +103,7 @@ describe("story gameplay schema", () => {
         objectType: "lock",
         grantItemId: null,
         linkedKeyId: null,
+        targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
         successMessage: "",
@@ -135,6 +138,7 @@ describe("story gameplay schema", () => {
         objectType: "key",
         grantItemId: null,
         linkedKeyId: null,
+        targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
         successMessage: "",
@@ -169,6 +173,7 @@ describe("story gameplay schema", () => {
         objectType: "collectible",
         grantItemId: "item_missing",
         linkedKeyId: null,
+        targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
         successMessage: "",
@@ -186,6 +191,63 @@ describe("story gameplay schema", () => {
           issue.message.includes("item introuvable"),
       ),
     ).toBe(true);
+  });
+
+  it("includes lock branch targets in gameplay outgoing links", () => {
+    const gameplay = createBlock("gameplay", { x: 50, y: 50 }) as GameplayBlock;
+    gameplay.nextBlockId = "fallback-block";
+    gameplay.objects = [
+      {
+        id: "lock-1",
+        name: "Serrure A",
+        assetId: null,
+        soundAssetId: null,
+        x: 20, y: 20, width: 12, height: 12, zIndex: 1,
+        visibleByDefault: true,
+        objectType: "lock",
+        grantItemId: null,
+        linkedKeyId: "key-1",
+        targetBlockId: "success-block",
+        unlockEffect: "go_to_next",
+        lockedMessage: "",
+        successMessage: "",
+        effects: [],
+      },
+    ];
+
+    const outgoing = getBlockOutgoingTargets(gameplay);
+
+    expect(outgoing).toContain("fallback-block");
+    expect(outgoing).toContain("success-block");
+  });
+
+  it("normalizes gameplay lock targetBlockId to null when malformed", () => {
+    const base = createBlock("gameplay", { x: 0, y: 0 }) as GameplayBlock;
+    const malformed = {
+      ...base,
+      objects: [
+        {
+          id: "lock-1",
+          name: "Serrure",
+          assetId: null,
+          soundAssetId: null,
+          x: 10, y: 10, width: 12, height: 12, zIndex: 1,
+          visibleByDefault: true,
+          objectType: "lock",
+          grantItemId: null,
+          linkedKeyId: "key-1",
+          targetBlockId: 123 as unknown as string,
+          unlockEffect: "go_to_next",
+          lockedMessage: "",
+          successMessage: "",
+          effects: [],
+        },
+      ],
+    } as unknown as GameplayBlock;
+
+    const normalized = normalizeGameplayBlock(malformed);
+
+    expect(normalized.objects[0].targetBlockId).toBeNull();
   });
 });
 

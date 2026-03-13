@@ -49,6 +49,7 @@ import {
   buildEdge,
   buildInitialStudio,
   choiceLabelFromHandle,
+  gameplayLockIdFromHandle,
   lineIdFromHandle,
   rebuildEdgesFromNodes,
   removeItemReferences,
@@ -974,6 +975,35 @@ export function AuthorStudioApp() {
             };
           }
 
+          if (node.data.block.type === "gameplay") {
+            const lockId = gameplayLockIdFromHandle(sourceHandle);
+            if (!lockId) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  block: {
+                    ...node.data.block,
+                    nextBlockId: targetId,
+                  } as StoryBlock,
+                },
+              };
+            }
+
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                block: {
+                  ...node.data.block,
+                  objects: node.data.block.objects.map((obj) =>
+                    obj.id === lockId ? { ...obj, targetBlockId: targetId } : obj,
+                  ),
+                },
+              },
+            };
+          }
+
           if (
             node.data.block.type === "hero_profile" ||
             node.data.block.type === "npc_profile"
@@ -1263,6 +1293,7 @@ export function AuthorStudioApp() {
         const freshId = createId("gobj");
         idMap.set(oldId, freshId);
         obj.id = freshId;
+        obj.targetBlockId = null;
       }
       // Remap linkedKeyId references
       for (const obj of objects) {
@@ -1425,6 +1456,18 @@ export function AuthorStudioApp() {
         setConnection(connection.source, handle, connection.target, connection.targetHandle);
         logAction("link", `${sourceNode.name} choix ${label} -> ${connection.target}`);
         return;
+        }
+
+      if (sourceNode.type === "gameplay") {
+        const lockId = gameplayLockIdFromHandle(connection.sourceHandle);
+        if (lockId) {
+          const handle = `lock-${lockId}`;
+          setConnection(connection.source, handle, connection.target, connection.targetHandle);
+          logAction("link", `${sourceNode.name} serrure ${lockId} -> ${connection.target}`);
+          return;
+        }
+        setStatusMessage("Relie une serrure (S1, S2...) pour creer une sortie gameplay.");
+        return;
       }
 
       setConnection(connection.source, "next", connection.target, connection.targetHandle);
@@ -1583,6 +1626,23 @@ export function AuthorStudioApp() {
     selectedBlock,
     updateSelectedBlock,
   });
+
+  const removeGameplayObjectAndEdges = useCallback(
+    (objectId: string) => {
+      if (!selectedBlock || selectedBlock.type !== "gameplay") return;
+      removeGameplayObject(objectId);
+      setEdges((current) =>
+        current.filter(
+          (edge) =>
+            !(
+              edge.source === selectedBlock.id &&
+              (edge.sourceHandle ?? "") === `lock-${objectId}`
+            ),
+        ),
+      );
+    },
+    [removeGameplayObject, selectedBlock, setEdges],
+  );
 
   const {
     addBlockEntryEffect,
@@ -2728,7 +2788,7 @@ export function AuthorStudioApp() {
                   onUpdateChoiceEffect={updateChoiceEffect}
                   onRemoveChoiceEffect={removeChoiceEffect}
                   onAddGameplayObject={addGameplayObject}
-                  onRemoveGameplayObject={removeGameplayObject}
+                  onRemoveGameplayObject={removeGameplayObjectAndEdges}
                   onUpdateGameplayObjectField={updateGameplayObjectField}
                   onUpdateGameplayObjectRect={updateGameplayObjectRect}
                   onClearGameplayObjectAsset={clearGameplayObjectAsset}

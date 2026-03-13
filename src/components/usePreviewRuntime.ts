@@ -413,8 +413,9 @@ export function usePreviewRuntime({
       if (lockObj.unlockEffect === "go_to_next") {
         // Apply completion effects and advance
         const completionVars = applyEffects(nextVariables, previewBlock.completionEffects);
+        const targetBlockId = lockObj.targetBlockId;
         setPreviewState(
-          buildPreviewState(previewBlock.nextBlockId, completionVars, nextInventory, previewState.npcAffinity),
+          buildPreviewState(targetBlockId, completionVars, nextInventory, previewState.npcAffinity),
         );
         return;
       }

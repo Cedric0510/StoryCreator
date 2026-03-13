@@ -60,8 +60,19 @@ export function lineIdFromHandle(handle: string | null | undefined): string | nu
   return match ? match[1] : null;
 }
 
+export function gameplayLockIdFromHandle(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const match = /^lock-(.+)$/.exec(handle);
+  return match ? match[1] : null;
+}
+
 export function buildEdge(source: string, target: string, sourceHandle: string, label?: string, targetHandle?: string): EditorEdge {
-  const derivedLabel = label ?? (sourceHandle === "npc-link" ? "PNJ" : choiceLabelFromHandle(sourceHandle));
+  const lockId = gameplayLockIdFromHandle(sourceHandle);
+  const derivedLabel =
+    label ??
+    (sourceHandle === "npc-link"
+      ? "PNJ"
+      : choiceLabelFromHandle(sourceHandle) ?? (lockId ? "Serrure" : undefined));
   const isNpcLink = sourceHandle === "npc-link";
   const isSelfEdge = source === target;
 
@@ -127,6 +138,14 @@ export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
         if (option.targetBlockId) {
           edges.push(buildEdge(block.id, option.targetBlockId, `choice-${option.label}`));
         }
+      }
+    } else if (block.type === "gameplay") {
+      const locks = block.objects.filter((obj) => obj.objectType === "lock");
+      for (let index = 0; index < locks.length; index += 1) {
+        const lock = locks[index];
+        if (!lock.targetBlockId) continue;
+        const lockLabel = lock.name.trim() || `Serrure ${index + 1}`;
+        edges.push(buildEdge(block.id, lock.targetBlockId, `lock-${lock.id}`, lockLabel));
       }
     } else if (block.type !== "hero_profile" && block.type !== "npc_profile") {
       if (block.nextBlockId) {
@@ -462,6 +481,9 @@ export function removeNodeReferences(block: StoryBlock, removedBlockId: string):
     return {
       ...block,
       nextBlockId: block.nextBlockId === removedBlockId ? null : block.nextBlockId,
+      objects: block.objects.map((obj) =>
+        obj.targetBlockId === removedBlockId ? { ...obj, targetBlockId: null } : obj,
+      ),
     };
   }
 
@@ -771,6 +793,7 @@ export function serializeBlock(
       objectType: obj.objectType,
       grantItemId: obj.grantItemId,
       linkedKeyId: obj.linkedKeyId,
+      targetBlockId: obj.targetBlockId,
       unlockEffect: obj.unlockEffect,
       lockedMessage: obj.lockedMessage,
       successMessage: obj.successMessage,
@@ -987,6 +1010,7 @@ export function deserializeBlockFromExport(
       objectType: (o.objectType as string) ?? undefined,
       grantItemId: (o.grantItemId as string) ?? null,
       linkedKeyId: (o.linkedKeyId as string) ?? null,
+      targetBlockId: (o.targetBlockId as string) ?? null,
       unlockEffect: (o.unlockEffect as string) ?? undefined,
       lockedMessage: (o.lockedMessage as string) ?? "",
       successMessage: (o.successMessage as string) ?? "",

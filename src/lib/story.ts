@@ -1,4 +1,4 @@
-export const STORY_SCHEMA_VERSION = "1.4.0";
+export const STORY_SCHEMA_VERSION = "1.5.0";
 
 export type BlockType =
   | "title"
@@ -44,6 +44,8 @@ export interface GameplayObject {
   grantItemId: string | null;
   /** For lock: which "key" object unlocks this lock */
   linkedKeyId: string | null;
+  /** Optional branch target when this lock unlocks (null = end of story). */
+  targetBlockId: string | null;
   /** For lock: what happens on unlock */
   unlockEffect: GameplayUnlockEffect;
   /** For lock: message shown when clicked without the key */
@@ -600,6 +602,7 @@ export function defaultGameplayObject(): GameplayObject {
     objectType: "decoration",
     grantItemId: null,
     linkedKeyId: null,
+    targetBlockId: null,
     unlockEffect: "go_to_next",
     lockedMessage: "",
     successMessage: "",
@@ -907,6 +910,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         : "decoration",
       grantItemId: typeof obj.grantItemId === "string" && obj.grantItemId ? obj.grantItemId : null,
       linkedKeyId: typeof obj.linkedKeyId === "string" && obj.linkedKeyId ? obj.linkedKeyId : null,
+      targetBlockId: typeof obj.targetBlockId === "string" && obj.targetBlockId ? obj.targetBlockId : null,
       unlockEffect: (["go_to_next", "disappear", "modify_stats"] as string[]).includes(obj.unlockEffect as string)
         ? (obj.unlockEffect as GameplayUnlockEffect)
         : "go_to_next",
@@ -953,6 +957,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         objectType: actionToType[action] ?? "decoration",
         grantItemId: typeof v2.grantItemId === "string" && v2.grantItemId ? v2.grantItemId : null,
         linkedKeyId: null,
+        targetBlockId: null,
         unlockEffect: "go_to_next",
         lockedMessage: "",
         successMessage: "",
@@ -975,6 +980,10 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         target.lockedMessage = typeof link.lockedMessage === "string" ? link.lockedMessage : "";
         target.successMessage = typeof link.successMessage === "string" ? link.successMessage : "";
         target.unlockEffect = link.result === "go_to_block" ? "go_to_next" : "disappear";
+        target.targetBlockId =
+          link.result === "go_to_block" && typeof link.resultBlockId === "string" && link.resultBlockId
+            ? link.resultBlockId
+            : null;
       }
     }
 
@@ -993,7 +1002,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         zIndex: ov.zIndex,
         visibleByDefault: ov.visibleByDefault,
         objectType: "decoration",
-        grantItemId: null, linkedKeyId: null,
+        grantItemId: null, linkedKeyId: null, targetBlockId: null,
         unlockEffect: "go_to_next", lockedMessage: "", successMessage: "",
         soundAssetId: null,
         effects: [],
@@ -1019,6 +1028,7 @@ export function normalizeGameplayBlock(block: GameplayBlock): GameplayBlock {
         objectType,
         grantItemId,
         linkedKeyId: null,
+        targetBlockId: null,
         unlockEffect: "go_to_next", lockedMessage: hs.lockedMessage || "", successMessage: "",
         soundAssetId: hs.soundAssetId,
         effects: normalizeVariableEffects(hs.effects),
@@ -1255,7 +1265,12 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
   }
 
   if (block.type === "gameplay") {
-    return block.nextBlockId ? [block.nextBlockId] : [];
+    const lockTargets = block.objects
+      .filter((obj) => obj.objectType === "lock" && obj.unlockEffect === "go_to_next")
+      .map((obj) => obj.targetBlockId)
+      .filter((targetId): targetId is string => Boolean(targetId));
+    const targets = block.nextBlockId ? [block.nextBlockId, ...lockTargets] : lockTargets;
+    return Array.from(new Set(targets));
   }
 
   return block.nextBlockId ? [block.nextBlockId] : [];
@@ -1540,6 +1555,13 @@ export function validateStoryBlocks(
           issues.push({
             level: "warning",
             message: `La serrure "${obj.name}" n'a aucune cle associee.`,
+            blockId: block.id,
+          });
+        }
+        if (obj.objectType === "lock" && obj.targetBlockId && !blockById.has(obj.targetBlockId)) {
+          issues.push({
+            level: "error",
+            message: `La serrure "${obj.name}" pointe vers un bloc supprime.`,
             blockId: block.id,
           });
         }

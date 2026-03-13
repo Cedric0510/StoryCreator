@@ -1440,9 +1440,17 @@ label {
   overflow: visible;
 }
 
+.pointclick-overlay-box,
+.preview-pointclick-overlay,
+.preview-pointclick-object {
+  box-sizing: border-box;
+}
+
 .pointclick-overlay-box {
   pointer-events: auto;
   cursor: grab;
+  border: 0;
+  background-color: transparent;
 }
 
 .pointclick-overlay-box:active {
@@ -1528,8 +1536,8 @@ label {
 .preview-pointclick-object {
   position: absolute;
   border-radius: 8px;
-  border: 2px solid rgba(15, 118, 110, 0.6);
-  background: rgba(20, 184, 166, 0.12);
+  border: 0;
+  background-color: transparent;
   z-index: 500;
   display: flex;
   align-items: center;
@@ -1555,8 +1563,8 @@ label {
 }
 
 .preview-pointclick-object-interacted {
-  border-color: rgba(15, 118, 110, 0.94);
-  background: rgba(20, 184, 166, 0.26);
+  border-color: transparent;
+  background-color: transparent;
 }
 
 /* ── V3 type-specific border colors (preview) ── */

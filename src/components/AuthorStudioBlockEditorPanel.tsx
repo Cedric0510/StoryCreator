@@ -36,7 +36,7 @@ interface DialogueSceneClipboard {
   sceneLayout: SceneLayout;
 }
 
-/** Module-level clipboard — persists across block selections within the session. */
+/** Module-level clipboard Ã¢â‚¬â€ persists across block selections within the session. */
 let dialogueSceneClipboard: DialogueSceneClipboard | null = null;
 
 type ChoiceField = "text" | "targetBlockId";
@@ -449,9 +449,9 @@ function CinematicEditorSection({
   );
 }
 
-/* ═══════════════════════════════════════════════════════════
-   Scene Copy / Paste — images + layout clipboard (dialogue & cinematic)
-   ═══════════════════════════════════════════════════════════ */
+/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+   Scene Copy / Paste Ã¢â‚¬â€ images + layout clipboard (dialogue & cinematic)
+   Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */
 
 interface SceneCopyPasteProps {
   block: DialogueBlock | CinematicBlock | GameplayBlock;
@@ -531,9 +531,9 @@ function SceneCopyPaste({
   );
 }
 
-/* ═══════════════════════════════════════════════
-   Scene Composer — gameplay-style drag & resize
-   ═══════════════════════════════════════════════ */
+/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+   Scene Composer Ã¢â‚¬â€ gameplay-style drag & resize
+   Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */
 
 interface SceneCharacterLayerInfo {
   key: string;
@@ -701,7 +701,7 @@ function SceneComposer({ layout: layoutProp, bgSrc, characterLayers, charSrc, ca
           onClick={() => onChange({ ...DEFAULT_SCENE_LAYOUT })}
           disabled={!canEdit}
           title="Reinitialiser la composition"
-        >↺ Reset</button>
+        >Ã¢â€ Âº Reset</button>
       </div>
 
       <div
@@ -712,7 +712,7 @@ function SceneComposer({ layout: layoutProp, bgSrc, characterLayers, charSrc, ca
         onPointerUp={onScenePointerUp}
         onPointerCancel={onScenePointerCancel}
       >
-        {/* Visual reference guides — thirds + center */}
+        {/* Visual reference guides Ã¢â‚¬â€ thirds + center */}
         <div className="scene-composer-guide scene-composer-guide-h" style={{ top: "33.33%" }} />
         <div className="scene-composer-guide scene-composer-guide-h" style={{ top: "50%" }}>
           <span className="scene-composer-guide-label">50%</span>
@@ -1059,7 +1059,7 @@ function DialogueEditorSection({
         >
           {block.lines.map((line, index) => (
             <option key={line.id} value={line.id}>
-              Ligne {index + 1} — {line.speaker || "…"}
+              Ligne {index + 1} Ã¢â‚¬â€ {line.speaker || "Ã¢â‚¬Â¦"}
             </option>
           ))}
         </select>
@@ -1262,7 +1262,7 @@ function DialogueEditorSection({
                       const globalIndex = block.lines.indexOf(candidate);
                       return (
                         <option key={candidate.id} value={candidate.id}>
-                          Ligne {globalIndex + 1} — {candidate.speaker || "…"}
+                          Ligne {globalIndex + 1} Ã¢â‚¬â€ {candidate.speaker || "Ã¢â‚¬Â¦"}
                         </option>
                       );
                     })}
@@ -1376,7 +1376,7 @@ function DialogueEditorSection({
                       const globalIndex = block.lines.indexOf(candidate);
                       return (
                         <option key={candidate.id} value={candidate.id}>
-                          Ligne {globalIndex + 1} — {candidate.speaker || "…"}
+                          Ligne {globalIndex + 1} Ã¢â‚¬â€ {candidate.speaker || "Ã¢â‚¬Â¦"}
                         </option>
                       );
                     })}
@@ -1888,6 +1888,18 @@ interface GameplayEditorSectionProps {
   onStatusMessage: (message: string) => void;
 }
 
+function gameplayClampCran(value: number) {
+  return Math.min(5, Math.max(1, Math.round(value)));
+}
+
+function gameplayCranFromZIndex(zIndex: number) {
+  return 6 - gameplayClampCran(zIndex);
+}
+
+function gameplayZIndexFromCran(cran: number) {
+  return 6 - gameplayClampCran(cran);
+}
+
 function GameplayEditorSection({
   block,
   canEdit,
@@ -1902,7 +1914,6 @@ function GameplayEditorSection({
   onAddGameplayObject,
   onRemoveGameplayObject,
   onUpdateGameplayObjectField,
-  onUpdateGameplayObjectRect,
   onClearGameplayObjectAsset,
   onClearGameplayObjectSound,
   onAddGameplayObjectEffect,
@@ -1936,7 +1947,14 @@ function GameplayEditorSection({
     modify_stats: "Modifie les stats",
   };
 
-  // Build key→lock arrow pairs for the scene overlay
+  const linkableBlocks = blocks.filter(
+    (candidate) =>
+      candidate.id !== block.id &&
+      candidate.type !== "hero_profile" &&
+      candidate.type !== "npc_profile",
+  );
+
+  // Build keyÃ¢â€ â€™lock arrow pairs for the scene overlay
   const keyLockPairs = block.objects
     .filter((o) => o.objectType === "lock" && o.linkedKeyId)
     .map((lock) => {
@@ -1955,7 +1973,7 @@ function GameplayEditorSection({
         </HelpHint>
       </div>
 
-      {/* ── Objectif ── */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Objectif Ã¢â€â‚¬Ã¢â€â‚¬ */}
       <label>
         Objectif
         <textarea
@@ -1974,14 +1992,14 @@ function GameplayEditorSection({
         onStatusMessage={onStatusMessage}
       />
 
-      {/* ── Background ── */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Background Ã¢â€â‚¬Ã¢â€â‚¬ */}
       <label>
         Image fond
         <input type="file" accept="image/*" onChange={onAssetInput("backgroundAssetId")} disabled={!canEdit} />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
 
-      {/* ── Unified scene: background composer + interactive objects ── */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Unified scene: background composer + interactive objects Ã¢â€â‚¬Ã¢â€â‚¬ */}
       <div className="section-title-row">
         <small>
           {gameplayPlacementTarget
@@ -1998,7 +2016,6 @@ function GameplayEditorSection({
             b.type === "gameplay" ? { ...b, sceneLayout: newLayout } : b,
           );
         }}
-        sceneClassName="pointclick-editor-scene"
         onSceneClick={onGameplaySceneClick}
         onScenePointerMove={onGameplayScenePointerMove}
         onScenePointerUp={onGameplayScenePointerEnd}
@@ -2036,7 +2053,7 @@ function GameplayEditorSection({
             </div>
           ))}
 
-        {/* SVG arrows from key center → lock center */}
+        {/* SVG arrows from key center Ã¢â€ â€™ lock center */}
         <svg className="pointclick-arrows-svg">
           {keyLockPairs.map(({ key: k, lock: l }) => {
             const kx = k.x + k.width / 2;
@@ -2063,14 +2080,14 @@ function GameplayEditorSection({
         </svg>
       </SceneComposer>
 
-      {/* ── Ambiance ── */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Ambiance Ã¢â€â‚¬Ã¢â€â‚¬ */}
       <label>
         Audio ambiance
         <input type="file" accept="audio/*" onChange={onAssetInput("voiceAssetId")} disabled={!canEdit} />
       </label>
       {renderAssetAttachment("voiceAssetId", block.voiceAssetId)}
 
-      {/* ── Objects list ── */}
+      {/* Ã¢â€â‚¬Ã¢â€â‚¬ Objects list Ã¢â€â‚¬Ã¢â€â‚¬ */}
       <div className="section-title-row">
         <div className="title-with-help">
           <h3>Objets</h3>
@@ -2124,12 +2141,20 @@ function GameplayEditorSection({
           </label>
           {renderAssetAttachmentWithRemove(obj.assetId, () => onClearGameplayObjectAsset(obj.id))}
 
-          {/* ── Type ── */}
+          {/* Ã¢â€â‚¬Ã¢â€â‚¬ Type Ã¢â€â‚¬Ã¢â€â‚¬ */}
           <label>
             Type
             <select
               value={obj.objectType}
-              onChange={(event) => onUpdateGameplayObjectField(obj.id, "objectType", event.target.value as GameplayObjectType)}
+              onChange={(event) => {
+                const nextType = event.target.value as GameplayObjectType;
+                onUpdateGameplayObjectField(obj.id, "objectType", nextType);
+                if (nextType !== "lock") {
+                  onUpdateGameplayObjectField(obj.id, "linkedKeyId", null);
+                  onUpdateGameplayObjectField(obj.id, "targetBlockId", null);
+                  onSetConnection(block.id, `lock-${obj.id}`, null);
+                }
+              }}
               disabled={!canEdit}
             >
               {(Object.keys(typeLabels) as GameplayObjectType[]).map((key) => (
@@ -2138,24 +2163,27 @@ function GameplayEditorSection({
             </select>
           </label>
 
-          {/* ── Size & zIndex (no X/Y — position via mouse drag only) ── */}
+          {/* Ã¢â€â‚¬Ã¢â€â‚¬ Plan (1 = devant, 5 = derriere) Ã¢â€â‚¬Ã¢â€â‚¬ */}
           <div className="grid-two">
             <label>
-              Largeur %
-              <input type="number" value={obj.width} onChange={(event) => onUpdateGameplayObjectRect(obj.id, "width", normalizeDelta(event.target.value))} disabled={!canEdit} />
-            </label>
-            <label>
-              Hauteur %
-              <input type="number" value={obj.height} onChange={(event) => onUpdateGameplayObjectRect(obj.id, "height", normalizeDelta(event.target.value))} disabled={!canEdit} />
-            </label>
-            <label>
-              z-index
-              <input
-                type="number"
-                value={obj.zIndex}
-                onChange={(event) => onUpdateGameplayObjectField(obj.id, "zIndex", normalizeDelta(event.target.value))}
+              Plan
+              <select
+                value={gameplayCranFromZIndex(obj.zIndex)}
+                onChange={(event) =>
+                  onUpdateGameplayObjectField(
+                    obj.id,
+                    "zIndex",
+                    gameplayZIndexFromCran(Number(event.target.value)),
+                  )
+                }
                 disabled={!canEdit}
-              />
+              >
+                <option value={1}>Cran 1</option>
+                <option value={2}>Cran 2</option>
+                <option value={3}>Cran 3</option>
+                <option value={4}>Cran 4</option>
+                <option value={5}>Cran 5</option>
+              </select>
             </label>
             <label>
               Visible au depart
@@ -2170,7 +2198,7 @@ function GameplayEditorSection({
             </label>
           </div>
 
-          {/* ── Type-specific fields ── */}
+          {/* Ã¢â€â‚¬Ã¢â€â‚¬ Type-specific fields Ã¢â€â‚¬Ã¢â€â‚¬ */}
           {obj.objectType === "collectible" && (
             <label>
               Objet donne
@@ -2217,6 +2245,23 @@ function GameplayEditorSection({
                 </select>
               </label>
               <label>
+                Bloc cible serrure
+                <select
+                  value={obj.targetBlockId ?? ""}
+                  onChange={(event) =>
+                    onSetConnection(block.id, `lock-${obj.id}`, event.target.value || null)
+                  }
+                  disabled={!canEdit || obj.unlockEffect !== "go_to_next"}
+                >
+                  <option value="">Fin histoire</option>
+                  {linkableBlocks.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.name} ({BLOCK_LABELS[candidate.type]})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
                 Message si verrouille
                 <textarea
                   rows={2}
@@ -2238,7 +2283,7 @@ function GameplayEditorSection({
             </>
           )}
 
-          {/* ── Sound ── */}
+          {/* Ã¢â€â‚¬Ã¢â€â‚¬ Sound Ã¢â€â‚¬Ã¢â€â‚¬ */}
           <label>
             Son au clic
             <input
@@ -2258,7 +2303,7 @@ function GameplayEditorSection({
           </label>
           {renderAssetAttachmentWithRemove(obj.soundAssetId, () => onClearGameplayObjectSound(obj.id))}
 
-          {/* ── Effects ── */}
+          {/* Ã¢â€â‚¬Ã¢â€â‚¬ Effects Ã¢â€â‚¬Ã¢â€â‚¬ */}
           <div className="effect-list">
             <div className="section-title-row">
               <span>Effets variables</span>
@@ -2303,16 +2348,8 @@ function GameplayEditorSection({
         </div>
       ))}
 
-      {/* ── Next block ── */}
-      <NextBlockSelect
-        selectedBlockId={block.id}
-        nextBlockId={block.nextBlockId}
-        blocks={blocks}
-        canEdit={canEdit}
-        onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
-      />
 
-      {/* ── Completion effects ── */}
+      {/* Completion effects */}
       <div className="effect-list">
         <div className="section-title-row">
           <div className="title-with-help">
@@ -2525,9 +2562,9 @@ function NpcProfileEditorSection({
   );
 }
 
-/* ═══════════════════════════════════════════════
+/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
    ChapterStartEditorSection
-   ═══════════════════════════════════════════════ */
+   Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */
 
 function ChapterStartEditorSection({
   block,
@@ -2569,9 +2606,9 @@ function ChapterStartEditorSection({
   );
 }
 
-/* ═══════════════════════════════════════════════
+/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
    ChapterEndEditorSection
-   ═══════════════════════════════════════════════ */
+   Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */
 
 function ChapterEndEditorSection({
   block,
@@ -2595,9 +2632,9 @@ function ChapterEndEditorSection({
   );
 }
 
-/* ═══════════════════════════════════════════════
-   ChapterAssignmentSelect — assign a block to a chapter
-   ═══════════════════════════════════════════════ */
+/* Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+   ChapterAssignmentSelect Ã¢â‚¬â€ assign a block to a chapter
+   Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â */
 
 function ChapterAssignmentSelect({
   block,
@@ -2610,7 +2647,7 @@ function ChapterAssignmentSelect({
   canEdit: boolean;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
 }) {
-  // chapter_start blocks auto-manage their chapterId — don't allow manual reassignment
+  // chapter_start blocks auto-manage their chapterId Ã¢â‚¬â€ don't allow manual reassignment
   if (block.type === "chapter_start") return null;
   if (project.chapters.length === 0) return null;
 
