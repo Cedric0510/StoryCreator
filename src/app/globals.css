@@ -1198,9 +1198,25 @@ label {
 
 .scene-composer-label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scene-composer-label .title-with-help {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.scene-composer-label strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.scene-composer-label > .button-secondary {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* The visual scene — same approach as .pointclick-editor-scene */
@@ -1227,8 +1243,11 @@ label {
   border-radius: 12px;
   padding: 10px;
   background: #ffffff;
-  margin-left: -60px;
-  margin-right: -60px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 /* Visual reference guides — horizontal and vertical */
