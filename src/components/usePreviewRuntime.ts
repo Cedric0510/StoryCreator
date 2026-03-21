@@ -13,6 +13,8 @@ export interface PreviewRuntimeState {
   currentBlockId: string | null;
   currentDialogueLineId: string | null;
   variables: Record<string, number>;
+  /** Last selected option id per choice block id. */
+  choiceHistory: Record<string, string>;
   inventory: Record<string, number>;
   /** Per-NPC affinity levels (keyed by npc_profile block id) */
   npcAffinity: Record<string, number>;
@@ -66,6 +68,22 @@ function resolveDialogueLine(
   return resolveDialogueLine(block, line.fallbackLineId, npcAffinity, seen);
 }
 
+/** Find the next dialogue line in block order that resolves with current conditions. */
+function findNextDialogueLineId(
+  block: DialogueBlock,
+  currentLineId: string,
+  npcAffinity: Record<string, number>,
+): string | null {
+  const currentIndex = block.lines.findIndex((line) => line.id === currentLineId);
+  const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+  for (let index = startIndex; index < block.lines.length; index += 1) {
+    const candidate = block.lines[index];
+    const resolved = resolveDialogueLine(block, candidate.id, npcAffinity);
+    if (resolved && resolved !== currentLineId) return resolved;
+  }
+  return null;
+}
+
 export function usePreviewRuntime({
   project,
   blockById,
@@ -82,6 +100,7 @@ export function usePreviewRuntime({
       npcAffinity: Record<string, number>,
       entryLineId?: string | null,
       equippedInventoryItemId?: string | null,
+      choiceHistory: Record<string, string> = {},
     ) => {
       const nextEquippedInventoryItemId =
         equippedInventoryItemId && (inventory[equippedInventoryItemId] ?? 0) > 0
@@ -91,6 +110,7 @@ export function usePreviewRuntime({
         currentBlockId: null,
         currentDialogueLineId: null,
         variables: endedVariables,
+        choiceHistory,
         inventory,
         npcAffinity,
         ended: true,
@@ -108,20 +128,47 @@ export function usePreviewRuntime({
       let resolvedBlockId: string | null = targetBlockId;
       let resolvedBlock = resolvedBlockId ? blockById.get(resolvedBlockId) ?? null : null;
       let nextVariables = variables;
-      const visitedChapterMarkers = new Set<string>();
+      const visitedAutoRoutingBlocks = new Set<string>();
 
       while (
         resolvedBlock &&
-        (resolvedBlock.type === "chapter_start" || resolvedBlock.type === "chapter_end")
+        (
+          resolvedBlock.type === "chapter_start" ||
+          resolvedBlock.type === "chapter_end" ||
+          resolvedBlock.type === "switch"
+        )
       ) {
-        if (visitedChapterMarkers.has(resolvedBlock.id)) {
-          setStatusMessage("Boucle detectee entre blocs chapitre en preview.");
+        if (visitedAutoRoutingBlocks.has(resolvedBlock.id)) {
+          setStatusMessage("Boucle detectee dans le routage automatique (chapitres/switch).");
           return buildEndedState(nextVariables);
         }
-        visitedChapterMarkers.add(resolvedBlock.id);
+        visitedAutoRoutingBlocks.add(resolvedBlock.id);
 
         nextVariables = applyEffects(nextVariables, resolvedBlock.entryEffects ?? []);
-        resolvedBlockId = resolvedBlock.nextBlockId;
+        if (resolvedBlock.type === "switch") {
+          const variableValue = resolvedBlock.variableId
+            ? (nextVariables[resolvedBlock.variableId] ?? 0)
+            : 0;
+          const matchedCase = resolvedBlock.cases.find(
+            (item) => {
+              if (!item.targetBlockId) return false;
+              if (item.conditionType === "choice") {
+                if (item.choiceConditions.length > 0) {
+                  return item.choiceConditions.every((condition) => {
+                    if (!condition.choiceBlockId || !condition.choiceOptionId) return false;
+                    return choiceHistory[condition.choiceBlockId] === condition.choiceOptionId;
+                  });
+                }
+                if (!item.choiceBlockId || !item.choiceOptionId) return false;
+                return choiceHistory[item.choiceBlockId] === item.choiceOptionId;
+              }
+              return item.expectedValue === variableValue;
+            },
+          );
+          resolvedBlockId = matchedCase?.targetBlockId ?? resolvedBlock.nextBlockId;
+        } else {
+          resolvedBlockId = resolvedBlock.nextBlockId;
+        }
         if (!resolvedBlockId) {
           return buildEndedState(nextVariables);
         }
@@ -153,6 +200,7 @@ export function usePreviewRuntime({
           currentBlockId: resolvedBlockId,
           currentDialogueLineId: resolvedLineId,
           variables: nextVariables,
+          choiceHistory,
           inventory,
           npcAffinity,
           ended: false,
@@ -169,6 +217,7 @@ export function usePreviewRuntime({
           currentBlockId: resolvedBlockId,
           currentDialogueLineId: null,
           variables: nextVariables,
+          choiceHistory,
           inventory,
           npcAffinity,
           ended: false,
@@ -190,6 +239,7 @@ export function usePreviewRuntime({
         currentBlockId: resolvedBlockId,
         currentDialogueLineId: null,
         variables: nextVariables,
+        choiceHistory,
         inventory,
         npcAffinity,
         ended: false,
@@ -222,7 +272,9 @@ export function usePreviewRuntime({
       }
     }
 
-    setPreviewState(buildPreviewState(project.info.startBlockId, initialVariables, {}, initialAffinity, null, null));
+    setPreviewState(
+      buildPreviewState(project.info.startBlockId, initialVariables, {}, initialAffinity, null, null, {}),
+    );
     setPreviewOpen(true);
   }, [blockById, buildPreviewState, project.info.startBlockId, project.variables, setStatusMessage]);
 
@@ -261,7 +313,76 @@ export function usePreviewRuntime({
   const continuePreview = useCallback(() => {
     if (!previewState || !previewBlock) return;
 
-    if (previewBlock.type === "dialogue" || previewBlock.type === "choice") return;
+    if (previewBlock.type === "choice") return;
+
+    if (previewBlock.type === "dialogue") {
+      const currentLine = previewState.currentDialogueLineId
+        ? previewBlock.lines.find((line) => line.id === previewState.currentDialogueLineId) ?? null
+        : null;
+
+      // No line resolved with conditions -> continue to next block.
+      if (!currentLine) {
+        setPreviewState(
+          buildPreviewState(
+            null,
+            previewState.variables,
+            previewState.inventory,
+            previewState.npcAffinity,
+            null,
+            previewState.equippedInventoryItemId,
+            previewState.choiceHistory,
+          ),
+        );
+        return;
+      }
+
+      // If the line has explicit responses, user must pick one.
+      if (currentLine.responses.length > 0) return;
+
+      // Optional explicit external route for "Continuer".
+      if (currentLine.continueTargetBlockId) {
+        setPreviewState(
+          buildPreviewState(
+            currentLine.continueTargetBlockId,
+            previewState.variables,
+            previewState.inventory,
+            previewState.npcAffinity,
+            null,
+            previewState.equippedInventoryItemId,
+            previewState.choiceHistory,
+          ),
+        );
+        return;
+      }
+
+      const nextLineId = findNextDialogueLineId(
+        previewBlock,
+        currentLine.id,
+        previewState.npcAffinity,
+      );
+      if (nextLineId) {
+        setPreviewState({
+          ...previewState,
+          currentDialogueLineId: nextLineId,
+          gameplayMessage: null,
+        });
+        return;
+      }
+
+      // End of dialogue lines -> continue to linked next block.
+      setPreviewState(
+        buildPreviewState(
+          null,
+          previewState.variables,
+          previewState.inventory,
+          previewState.npcAffinity,
+          null,
+          previewState.equippedInventoryItemId,
+          previewState.choiceHistory,
+        ),
+      );
+      return;
+    }
 
     if (previewBlock.type === "gameplay") {
       if (!isGameplayCompleted(previewBlock, new Set(previewState.gameplayInteractedObjectIds))) {
@@ -284,6 +405,7 @@ export function usePreviewRuntime({
         previewState.npcAffinity,
         null,
         previewState.equippedInventoryItemId,
+        previewState.choiceHistory,
       ),
     );
   }, [buildPreviewState, previewBlock, previewState, setStatusMessage]);
@@ -343,6 +465,7 @@ export function usePreviewRuntime({
             nextAffinity,
             resp.targetLineId,
             previewState.equippedInventoryItemId,
+            previewState.choiceHistory,
           ),
         );
         return;
@@ -352,15 +475,27 @@ export function usePreviewRuntime({
       if (previewBlock.type === "choice") {
         const choice = previewBlock.choices.find((item) => item.id === choiceId);
         if (!choice) return;
+        const nextChoiceHistory = {
+          ...previewState.choiceHistory,
+          [previewBlock.id]: choice.id,
+        };
+        let nextVariables = applyEffects(previewState.variables, choice.effects);
+        if (choice.heroMemoryVariableId) {
+          nextVariables = {
+            ...nextVariables,
+            [choice.heroMemoryVariableId]: choice.heroMemoryValue,
+          };
+        }
 
         setPreviewState(
           buildPreviewState(
             choice.targetBlockId,
-            applyEffects(previewState.variables, choice.effects),
+            nextVariables,
             previewState.inventory,
             previewState.npcAffinity,
             null,
             previewState.equippedInventoryItemId,
+            nextChoiceHistory,
           ),
         );
         return;
@@ -443,6 +578,7 @@ export function usePreviewRuntime({
               previewState.npcAffinity,
               null,
               previewState.equippedInventoryItemId,
+              previewState.choiceHistory,
             ),
           );
           return;
@@ -456,6 +592,7 @@ export function usePreviewRuntime({
             previewState.npcAffinity,
             null,
             previewState.equippedInventoryItemId,
+            previewState.choiceHistory,
           ),
         );
         return;
@@ -540,6 +677,7 @@ export function usePreviewRuntime({
             previewState.npcAffinity,
             null,
             previewState.equippedInventoryItemId,
+            previewState.choiceHistory,
           ),
         );
         return;
@@ -616,6 +754,7 @@ export function usePreviewRuntime({
             previewState.npcAffinity,
             null,
             previewState.equippedInventoryItemId,
+            previewState.choiceHistory,
           ),
         );
         return;

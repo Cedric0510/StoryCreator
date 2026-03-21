@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   createBlock,
+  createDefaultResponse,
   getBlockOutgoingTargets,
   normalizeGameplayBlock,
   normalizeStoryBlock,
   validateStoryBlocks,
+  type CinematicBlock,
   type ChoiceBlock,
   type DialogueBlock,
   type GameplayBlock,
+  type SwitchBlock,
 } from "./story";
 
 describe("story gameplay schema", () => {
@@ -568,15 +571,25 @@ describe("story choice block", () => {
     const block = createBlock("choice", { x: 0, y: 0 }) as ChoiceBlock;
 
     expect(block.type).toBe("choice");
+    expect(block.displayMode).toBe("visual");
     expect(block.prompt).toBe("Que fais-tu ?");
     expect(block.backgroundAssetId).toBeNull();
+    expect(block.sceneLayout).toEqual({
+      background: { x: 0, y: 0, width: 100, height: 100 },
+      character: { x: 25, y: 10, width: 50, height: 80 },
+    });
+    expect(block.characterLayers).toEqual([]);
     expect(block.voiceAssetId).toBeNull();
     expect(block.choices).toHaveLength(2);
     expect(block.choices[0].label).toBe("A");
     expect(block.choices[1].label).toBe("B");
     expect(block.choices[0].description).toBe("");
     expect(block.choices[0].imageAssetId).toBeNull();
+    expect(block.choices[0].layout).toEqual({ x: 8, y: 22, width: 38, height: 68 });
+    expect(block.choices[0].zIndex).toBe(2);
     expect(block.choices[0].effects).toEqual([]);
+    expect(block.choices[0].heroMemoryVariableId).toBeNull();
+    expect(block.choices[0].heroMemoryValue).toBe(1);
   });
 
   it("reports empty prompt as warning", () => {
@@ -629,10 +642,210 @@ describe("story choice block", () => {
       ),
     ).toBe(true);
   });
+
+  it("normalizes legacy choice options without layout", () => {
+    const raw = {
+      id: "choice_legacy",
+      type: "choice",
+      name: "Choice",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      prompt: "Choix",
+      backgroundAssetId: null,
+      voiceAssetId: null,
+      choices: [
+        {
+          id: "opt_a",
+          label: "A",
+          text: "Option A",
+          description: "",
+          imageAssetId: null,
+          targetBlockId: null,
+          effects: [],
+        },
+      ],
+    };
+
+    const normalized = normalizeStoryBlock(raw as unknown as ChoiceBlock) as ChoiceBlock;
+    expect(normalized.displayMode).toBe("text");
+    expect(normalized.sceneLayout).toEqual({
+      background: { x: 0, y: 0, width: 100, height: 100 },
+      character: { x: 25, y: 10, width: 50, height: 80 },
+    });
+    expect(normalized.choices[0].layout).toEqual({ x: 8, y: 22, width: 38, height: 68 });
+    expect(normalized.choices[0].zIndex).toBe(2);
+  });
+
+  it("normalizes legacy choice with images to visual mode", () => {
+    const raw = {
+      id: "choice_legacy_visual",
+      type: "choice",
+      name: "Choice Visual",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      prompt: "Choix",
+      backgroundAssetId: null,
+      voiceAssetId: null,
+      choices: [
+        {
+          id: "opt_a",
+          label: "A",
+          text: "Option A",
+          description: "",
+          imageAssetId: "asset_choice_img",
+          targetBlockId: null,
+          effects: [],
+        },
+      ],
+    };
+
+    const normalized = normalizeStoryBlock(raw as unknown as ChoiceBlock) as ChoiceBlock;
+    expect(normalized.displayMode).toBe("visual");
+  });
+
+  it("preserves explicit choice display mode", () => {
+    const raw = {
+      id: "choice_explicit_mode",
+      type: "choice",
+      name: "Choice",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      displayMode: "text",
+      prompt: "Choix",
+      backgroundAssetId: null,
+      voiceAssetId: null,
+      choices: [
+        {
+          id: "opt_a",
+          label: "A",
+          text: "Option A",
+          description: "",
+          imageAssetId: "asset_choice_img",
+          targetBlockId: null,
+          effects: [],
+        },
+      ],
+    };
+
+    const normalized = normalizeStoryBlock(raw as unknown as ChoiceBlock) as ChoiceBlock;
+    expect(normalized.displayMode).toBe("text");
+  });
+});
+
+describe("story switch block", () => {
+  it("creates switch block with defaults", () => {
+    const block = createBlock("switch", { x: 0, y: 0 }) as SwitchBlock;
+
+    expect(block.type).toBe("switch");
+    expect(block.variableId).toBeNull();
+    expect(block.cases).toHaveLength(1);
+    expect(block.cases[0].conditionType).toBe("choice");
+    expect(block.cases[0].expectedValue).toBe(1);
+    expect(block.cases[0].choiceConditions).toHaveLength(1);
+    expect(block.cases[0].choiceConditions[0].choiceBlockId).toBeNull();
+    expect(block.cases[0].choiceConditions[0].choiceOptionId).toBeNull();
+    expect(block.cases[0].choiceBlockId).toBeNull();
+    expect(block.cases[0].choiceOptionId).toBeNull();
+    expect(block.cases[0].targetBlockId).toBeNull();
+    expect(block.nextBlockId).toBeNull();
+  });
+
+  it("includes switch case and fallback targets in outgoing links", () => {
+    const block = createBlock("switch", { x: 0, y: 0 }) as SwitchBlock;
+    block.cases = [
+      {
+        id: "case-1",
+        conditionType: "value",
+        expectedValue: 1,
+        choiceConditions: [],
+        choiceBlockId: null,
+        choiceOptionId: null,
+        targetBlockId: "target-a",
+      },
+      {
+        id: "case-2",
+        conditionType: "value",
+        expectedValue: 2,
+        choiceConditions: [],
+        choiceBlockId: null,
+        choiceOptionId: null,
+        targetBlockId: "target-b",
+      },
+    ];
+    block.nextBlockId = "target-fallback";
+
+    const outgoing = getBlockOutgoingTargets(block);
+
+    expect(outgoing).toContain("target-a");
+    expect(outgoing).toContain("target-b");
+    expect(outgoing).toContain("target-fallback");
+  });
+
+  it("normalizes legacy switch cases to value mode", () => {
+    const raw = {
+      id: "switch_legacy",
+      type: "switch",
+      name: "Legacy",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      variableId: "var_1",
+      cases: [
+        {
+          id: "case_1",
+          expectedValue: 2,
+          targetBlockId: "block_ok",
+        },
+      ],
+      nextBlockId: "block_ko",
+    };
+
+    const normalized = normalizeStoryBlock(raw as unknown as SwitchBlock) as SwitchBlock;
+    expect(normalized.cases[0].conditionType).toBe("value");
+    expect(normalized.cases[0].choiceConditions).toEqual([]);
+    expect(normalized.cases[0].choiceBlockId).toBeNull();
+    expect(normalized.cases[0].choiceOptionId).toBeNull();
+  });
+
+  it("migrates legacy single choice condition to choiceConditions array", () => {
+    const raw = {
+      id: "switch_choice_legacy",
+      type: "switch",
+      name: "Legacy Choice",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      variableId: null,
+      cases: [
+        {
+          id: "case_legacy_choice",
+          conditionType: "choice",
+          expectedValue: 0,
+          choiceBlockId: "choice_block_1",
+          choiceOptionId: "choice_option_b",
+          targetBlockId: "block_target",
+        },
+      ],
+      nextBlockId: "block_else",
+    };
+
+    const normalized = normalizeStoryBlock(raw as unknown as SwitchBlock) as SwitchBlock;
+    expect(normalized.cases[0].choiceConditions).toHaveLength(1);
+    expect(normalized.cases[0].choiceConditions[0].choiceBlockId).toBe("choice_block_1");
+    expect(normalized.cases[0].choiceConditions[0].choiceOptionId).toBe("choice_option_b");
+  });
 });
 
 describe("story dialogue block (multi-line)", () => {
-  it("creates dialogue block with one default line and two responses", () => {
+  it("creates dialogue block with one default line and no response", () => {
     const block = createBlock("dialogue", { x: 0, y: 0 }) as DialogueBlock;
 
     expect(block.type).toBe("dialogue");
@@ -641,15 +854,10 @@ describe("story dialogue block (multi-line)", () => {
     expect(block.lines[0].speaker).toBe("Narrateur");
     expect(block.lines[0].text).toBe("");
     expect(block.lines[0].voiceAssetId).toBeNull();
-    expect(block.lines[0].responses).toHaveLength(2);
-    expect(block.lines[0].responses[0].label).toBe("A");
-    expect(block.lines[0].responses[1].label).toBe("B");
-    expect(block.lines[0].responses[0].targetLineId).toBeNull();
-    expect(block.lines[0].responses[0].targetBlockId).toBeNull();
-    expect(block.lines[0].responses[0].effects).toEqual([]);
-    expect(block.lines[0].responses[0].affinityEffects).toEqual([]);
+    expect(block.lines[0].responses).toHaveLength(0);
     expect(block.lines[0].conditions).toEqual([]);
     expect(block.lines[0].fallbackLineId).toBeNull();
+    expect(block.lines[0].continueTargetBlockId).toBeNull();
     // sceneLayout defaults
     expect(block.sceneLayout).toEqual({
       background: { x: 0, y: 0, width: 100, height: 100 },
@@ -694,6 +902,7 @@ describe("story dialogue block (multi-line)", () => {
     expect(dBlock.lines[0].responses[0].affinityEffects).toEqual([]);
     expect(dBlock.lines[0].conditions).toEqual([]);
     expect(dBlock.lines[0].fallbackLineId).toBeNull();
+    expect(dBlock.lines[0].continueTargetBlockId).toBeNull();
     expect(dBlock.startLineId).toBe(dBlock.lines[0].id);
     // sceneLayout is auto-filled even on v1 migration
     expect(dBlock.sceneLayout).toEqual({
@@ -724,6 +933,7 @@ describe("story dialogue block (multi-line)", () => {
   it("reports response targeting a deleted external block", () => {
     const title = createBlock("title", { x: 0, y: 0 });
     const dialogue = createBlock("dialogue", { x: 50, y: 50 }) as DialogueBlock;
+    dialogue.lines[0].responses = [createDefaultResponse("A")];
     dialogue.lines[0].responses[0].targetBlockId = "block_missing";
 
     const issues = validateStoryBlocks([title, dialogue], title.id);
@@ -741,6 +951,7 @@ describe("story dialogue block (multi-line)", () => {
   it("reports response targeting a deleted internal line", () => {
     const title = createBlock("title", { x: 0, y: 0 });
     const dialogue = createBlock("dialogue", { x: 50, y: 50 }) as DialogueBlock;
+    dialogue.lines[0].responses = [createDefaultResponse("A")];
     dialogue.lines[0].responses[0].targetLineId = "line_missing";
 
     const issues = validateStoryBlocks([title, dialogue], title.id);
@@ -753,6 +964,57 @@ describe("story dialogue block (multi-line)", () => {
           issue.message.includes("ligne supprimee"),
       ),
     ).toBe(true);
+  });
+});
+
+describe("story cinematic block (multi-character)", () => {
+  it("creates cinematic block with multi-character defaults", () => {
+    const block = createBlock("cinematic", { x: 0, y: 0 }) as CinematicBlock;
+
+    expect(block.type).toBe("cinematic");
+    expect(block.characterAssetId).toBeNull();
+    expect(block.characterLayers).toEqual([]);
+    expect(block.sceneLayout).toEqual({
+      background: { x: 0, y: 0, width: 100, height: 100 },
+      character: { x: 25, y: 10, width: 50, height: 80 },
+    });
+  });
+
+  it("migrates legacy single character asset to one cinematic layer", () => {
+    const rawLegacy = {
+      id: "cin_1",
+      type: "cinematic",
+      name: "Intro",
+      notes: "",
+      position: { x: 0, y: 0 },
+      entryEffects: [],
+      chapterId: null,
+      heading: "Intro",
+      body: "",
+      backgroundAssetId: null,
+      characterAssetId: "asset_char_legacy",
+      sceneLayout: {
+        background: { x: 0, y: 0, width: 100, height: 100 },
+        character: { x: 30, y: 12, width: 42, height: 76 },
+      },
+      videoAssetId: null,
+      voiceAssetId: null,
+      autoAdvanceSeconds: null,
+      nextBlockId: null,
+    };
+
+    const normalized = normalizeStoryBlock(rawLegacy as unknown as CinematicBlock);
+    const cinematic = normalized as CinematicBlock;
+
+    expect(cinematic.characterAssetId).toBe("asset_char_legacy");
+    expect(cinematic.characterLayers).toHaveLength(1);
+    expect(cinematic.characterLayers[0].assetId).toBe("asset_char_legacy");
+    expect(cinematic.characterLayers[0].layout).toEqual({
+      x: 30,
+      y: 12,
+      width: 42,
+      height: 76,
+    });
   });
 });
 

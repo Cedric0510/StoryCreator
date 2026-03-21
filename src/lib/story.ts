@@ -1,16 +1,18 @@
-export const STORY_SCHEMA_VERSION = "1.7.0";
+export const STORY_SCHEMA_VERSION = "1.9.0";
 
 export type BlockType =
   | "title"
   | "cinematic"
   | "dialogue"
   | "choice"
+  | "switch"
   | "gameplay"
   | "hero_profile"
   | "npc_profile"
   | "chapter_start"
   | "chapter_end";
 export type ChoiceLabel = "A" | "B" | "C" | "D";
+export type ChoiceDisplayMode = "visual" | "text";
 export type GameplayMode = "point_and_click" | "map_move" | "static_scene";
 export type MemberRole = "owner" | "editor" | "viewer";
 
@@ -278,8 +280,11 @@ export interface CinematicBlock extends BaseBlock {
   heading: string;
   body: string;
   backgroundAssetId: string | null;
+  /** @deprecated Use characterLayers instead. Kept for migration. */
   characterAssetId: string | null;
   sceneLayout: SceneLayout;
+  /** Multiple character image layers with z-ordering */
+  characterLayers: CharacterLayer[];
   videoAssetId: string | null;
   voiceAssetId: string | null;
   autoAdvanceSeconds: number | null;
@@ -306,6 +311,8 @@ export interface DialogueLine {
   conditions: DialogueLineCondition[];
   /** If conditions fail, jump to this line instead (null = skip responses) */
   fallbackLineId: string | null;
+  /** Optional external block target used by "Continuer" when there are no responses. */
+  continueTargetBlockId: string | null;
   responses: DialogueResponse[];
 }
 
@@ -338,6 +345,18 @@ export const DEFAULT_SCENE_LAYOUT: SceneLayout = {
   background: { x: 0, y: 0, width: 100, height: 100 },
   character:  { x: 25, y: 10, width: 50, height: 80 },
 };
+
+const DEFAULT_CHOICE_OPTION_LAYOUTS: Record<ChoiceLabel, SceneLayerLayout> = {
+  A: { x: 8, y: 22, width: 38, height: 68 },
+  B: { x: 54, y: 22, width: 38, height: 68 },
+  C: { x: 8, y: 56, width: 38, height: 36 },
+  D: { x: 54, y: 56, width: 38, height: 36 },
+};
+
+export function defaultChoiceOptionLayout(label: ChoiceLabel): SceneLayerLayout {
+  const layout = DEFAULT_CHOICE_OPTION_LAYOUTS[label] ?? DEFAULT_CHOICE_OPTION_LAYOUTS.A;
+  return { ...layout };
+}
 
 export interface DialogueBlock extends BaseBlock {
   type: "dialogue";
@@ -401,6 +420,10 @@ export interface ChapterStartBlock extends BaseBlock {
   type: "chapter_start";
   /** Display name of the chapter */
   chapterTitle: string;
+  /** Optional link to a previously validated chapter. */
+  linkedFromChapterId: string | null;
+  /** Optional chapter_end block used as entry from the previous chapter. */
+  linkedFromChapterEndBlockId: string | null;
   nextBlockId: string | null;
 }
 
@@ -416,16 +439,57 @@ export interface ChoiceOption {
   text: string;
   description: string;
   imageAssetId: string | null;
+  layout: SceneLayerLayout;
+  zIndex: number;
   targetBlockId: string | null;
   effects: VariableEffect[];
+  /** Optional hero-choice memory variable updated when this option is selected. */
+  heroMemoryVariableId: string | null;
+  /** Value assigned to heroMemoryVariableId when this option is selected. */
+  heroMemoryValue: number;
 }
 
 export interface ChoiceBlock extends BaseBlock {
   type: "choice";
+  displayMode: ChoiceDisplayMode;
   prompt: string;
   backgroundAssetId: string | null;
+  sceneLayout: SceneLayout;
+  /** Scene-only characters used in text mode (independent from choice options). */
+  characterLayers: CharacterLayer[];
   voiceAssetId: string | null;
   choices: ChoiceOption[];
+}
+
+export interface SwitchCase {
+  id: string;
+  conditionType: "value" | "choice";
+  expectedValue: number;
+  /** Choice conditions combined with AND (choice mode only). */
+  choiceConditions: SwitchChoiceCondition[];
+  /** @deprecated Legacy single choice source (migrated to choiceConditions). */
+  /** Choice block whose selected option should be checked (choice mode only). */
+  choiceBlockId: string | null;
+  /** @deprecated Legacy single choice option (migrated to choiceConditions). */
+  /** Expected selected option id in the referenced choice block (choice mode only). */
+  choiceOptionId: string | null;
+  targetBlockId: string | null;
+}
+
+export interface SwitchChoiceCondition {
+  id: string;
+  choiceBlockId: string | null;
+  choiceOptionId: string | null;
+}
+
+export interface SwitchBlock extends BaseBlock {
+  type: "switch";
+  /** Variable to evaluate when entering this block. */
+  variableId: string | null;
+  /** Ordered cases tested top-to-bottom (first match wins). */
+  cases: SwitchCase[];
+  /** Fallback path when no case matches. */
+  nextBlockId: string | null;
 }
 
 export type StoryBlock =
@@ -433,6 +497,7 @@ export type StoryBlock =
   | CinematicBlock
   | DialogueBlock
   | ChoiceBlock
+  | SwitchBlock
   | GameplayBlock
   | HeroProfileBlock
   | NpcProfileBlock
@@ -468,6 +533,8 @@ export interface Chapter {
   name: string;
   /** Whether this chapter is collapsed on the whiteboard */
   collapsed: boolean;
+  /** Whether the chapter is archived in the validated chapters list. */
+  validated: boolean;
 }
 
 export interface ProjectMeta {
@@ -493,6 +560,7 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   cinematic: "Cinematique",
   dialogue: "Dialogue",
   choice: "Choix",
+  switch: "Switch",
   gameplay: "Gameplay",
   hero_profile: "Fiche Hero",
   npc_profile: "Fiche PNJ",
@@ -588,7 +656,8 @@ export function createDefaultLine(speaker?: string): DialogueLine {
     voiceAssetId: null,
     conditions: [],
     fallbackLineId: null,
-    responses: [createDefaultResponse("A"), createDefaultResponse("B")],
+    continueTargetBlockId: null,
+    responses: [],
   };
 }
 
@@ -599,8 +668,12 @@ function createDefaultChoiceOption(label: ChoiceLabel): ChoiceOption {
     text: "",
     description: "",
     imageAssetId: null,
+    layout: defaultChoiceOptionLayout(label),
+    zIndex: 2,
     targetBlockId: null,
     effects: [],
+    heroMemoryVariableId: null,
+    heroMemoryValue: 1,
   };
 }
 
@@ -749,6 +822,7 @@ function migrateCharacterLayers(
   raw: Record<string, unknown>,
   existingLayers: CharacterLayer[],
   sceneLayout: SceneLayout,
+  includeNpcImage = true,
 ): CharacterLayer[] {
   if (existingLayers.length > 0) return existingLayers;
   const layers: CharacterLayer[] = [];
@@ -761,7 +835,7 @@ function migrateCharacterLayers(
       layout: { ...sceneLayout.character },
     });
   }
-  if (typeof raw.npcImageAssetId === "string" && raw.npcImageAssetId) {
+  if (includeNpcImage && typeof raw.npcImageAssetId === "string" && raw.npcImageAssetId) {
     layers.push({
       id: createId("clayer"),
       assetId: raw.npcImageAssetId,
@@ -785,6 +859,8 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       type,
       name: "Debut chapitre",
       chapterTitle: "Nouveau chapitre",
+      linkedFromChapterId: null,
+      linkedFromChapterEndBlockId: null,
       nextBlockId: null,
     };
   }
@@ -827,6 +903,7 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       backgroundAssetId: null,
       characterAssetId: null,
       sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
+      characterLayers: [],
       videoAssetId: null,
       voiceAssetId: null,
       autoAdvanceSeconds: null,
@@ -856,10 +933,40 @@ export function createBlock(type: BlockType, position: XYPosition): StoryBlock {
       ...base,
       type,
       name: "Choix",
+      displayMode: "visual",
       prompt: "Que fais-tu ?",
       backgroundAssetId: null,
+      sceneLayout: { ...DEFAULT_SCENE_LAYOUT },
+      characterLayers: [],
       voiceAssetId: null,
       choices: [createDefaultChoiceOption("A"), createDefaultChoiceOption("B")],
+    };
+  }
+
+  if (type === "switch") {
+    return {
+      ...base,
+      type,
+      name: "Switch",
+      variableId: null,
+      cases: [
+        {
+          id: createId("switch_case"),
+          conditionType: "choice",
+          expectedValue: 1,
+          choiceConditions: [
+            {
+              id: createId("switch_cond"),
+              choiceBlockId: null,
+              choiceOptionId: null,
+            },
+          ],
+          choiceBlockId: null,
+          choiceOptionId: null,
+          targetBlockId: null,
+        },
+      ],
+      nextBlockId: null,
     };
   }
 
@@ -1143,6 +1250,14 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
       chapterId: block.chapterId ?? null,
       entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
       chapterTitle: block.chapterTitle ?? "Chapitre",
+      linkedFromChapterId:
+        typeof (block as unknown as Record<string, unknown>).linkedFromChapterId === "string"
+          ? (block as unknown as Record<string, unknown>).linkedFromChapterId as string
+          : null,
+      linkedFromChapterEndBlockId:
+        typeof (block as unknown as Record<string, unknown>).linkedFromChapterEndBlockId === "string"
+          ? (block as unknown as Record<string, unknown>).linkedFromChapterEndBlockId as string
+          : null,
       nextBlockId: block.nextBlockId ?? null,
     };
   }
@@ -1203,6 +1318,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
           voiceAssetId: oldVoice,
           conditions: [],
           fallbackLineId: null,
+          continueTargetBlockId: null,
           responses: migratedResponses,
         }],
         startLineId: lineId,
@@ -1232,6 +1348,10 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
             voiceAssetId: line.voiceAssetId ?? null,
             conditions: normalizeConditions((line as unknown as Record<string, unknown>).conditions),
             fallbackLineId: typeof (line as unknown as Record<string, unknown>).fallbackLineId === "string" ? (line as unknown as Record<string, unknown>).fallbackLineId as string : null,
+            continueTargetBlockId:
+              typeof (line as unknown as Record<string, unknown>).continueTargetBlockId === "string"
+                ? (line as unknown as Record<string, unknown>).continueTargetBlockId as string
+                : null,
             responses: Array.isArray(line.responses)
               ? line.responses.map((resp) => ({
                   ...resp,
@@ -1249,6 +1369,7 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
 
   if (block.type === "cinematic") {
     const raw = block as unknown as Record<string, unknown>;
+    const sceneLayout = normalizeSceneLayout(raw.sceneLayout);
     return {
       ...block,
       entryEffects: normalizeVariableEffects(raw.entryEffects),
@@ -1256,25 +1377,147 @@ export function normalizeStoryBlock(block: StoryBlock): StoryBlock {
         typeof raw.characterAssetId === "string" && raw.characterAssetId
           ? raw.characterAssetId as string
           : null,
-      sceneLayout: normalizeSceneLayout(raw.sceneLayout),
+      sceneLayout,
+      characterLayers: migrateCharacterLayers(
+        raw,
+        normalizeCharacterLayers(raw.characterLayers),
+        sceneLayout,
+        false,
+      ),
     };
   }
 
   if (block.type === "choice") {
+    const rawChoice = block as unknown as Record<string, unknown>;
+    const sceneLayout = normalizeSceneLayout(rawChoice.sceneLayout);
+    const rawChoices = Array.isArray(block.choices) ? block.choices : [];
+    const hasAnyChoiceImage = rawChoices.some((option) => Boolean(option.imageAssetId));
+    const displayMode: ChoiceDisplayMode =
+      rawChoice.displayMode === "text" || rawChoice.displayMode === "visual"
+        ? rawChoice.displayMode
+        : hasAnyChoiceImage
+          ? "visual"
+          : "text";
+    const normalizedChoices = rawChoices.map((option) => ({
+      ...option,
+      description: option.description ?? "",
+      imageAssetId: option.imageAssetId ?? null,
+      layout: normalizeLayerLayout(
+        (option as unknown as Record<string, unknown>).layout,
+        defaultChoiceOptionLayout(option.label),
+      ),
+      zIndex:
+        typeof (option as unknown as Record<string, unknown>).zIndex === "number" &&
+        Number.isFinite((option as unknown as Record<string, unknown>).zIndex)
+          ? Math.min(5, Math.max(1, Math.round((option as unknown as Record<string, unknown>).zIndex as number)))
+          : 2,
+      effects: normalizeVariableEffects(option.effects),
+      heroMemoryVariableId:
+        typeof (option as unknown as Record<string, unknown>).heroMemoryVariableId === "string" &&
+        (option as unknown as Record<string, unknown>).heroMemoryVariableId
+          ? ((option as unknown as Record<string, unknown>).heroMemoryVariableId as string)
+          : null,
+      heroMemoryValue:
+        typeof (option as unknown as Record<string, unknown>).heroMemoryValue === "number" &&
+        Number.isFinite((option as unknown as Record<string, unknown>).heroMemoryValue)
+          ? ((option as unknown as Record<string, unknown>).heroMemoryValue as number)
+          : 1,
+    }));
+    const explicitCharacterLayers = normalizeCharacterLayers(rawChoice.characterLayers);
+    const migratedTextCharacterLayers =
+      displayMode === "text" && explicitCharacterLayers.length === 0
+        ? normalizedChoices
+            .filter((option) => Boolean(option.imageAssetId))
+            .map((option, index) => ({
+              id: `choice-text-layer-${option.id}`,
+              assetId: option.imageAssetId,
+              label: option.text?.trim() || `Perso ${index + 1}`,
+              zIndex: option.zIndex,
+              layout: option.layout,
+            }))
+        : explicitCharacterLayers;
     return {
       ...block,
       entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
+      displayMode,
       prompt: block.prompt ?? "",
       backgroundAssetId: block.backgroundAssetId ?? null,
+      sceneLayout,
+      characterLayers: migratedTextCharacterLayers,
       voiceAssetId: block.voiceAssetId ?? null,
-      choices: Array.isArray(block.choices)
-        ? block.choices.map((option) => ({
-            ...option,
-            description: option.description ?? "",
-            imageAssetId: option.imageAssetId ?? null,
-            effects: normalizeVariableEffects(option.effects),
-          }))
+      choices: normalizedChoices,
+    };
+  }
+
+  if (block.type === "switch") {
+    return {
+      ...block,
+      entryEffects: normalizeVariableEffects((block as { entryEffects?: unknown }).entryEffects),
+      variableId:
+        typeof (block as unknown as Record<string, unknown>).variableId === "string" &&
+        (block as unknown as Record<string, unknown>).variableId
+          ? ((block as unknown as Record<string, unknown>).variableId as string)
+          : null,
+      cases: Array.isArray((block as unknown as Record<string, unknown>).cases)
+        ? ((block as unknown as Record<string, unknown>).cases as Record<string, unknown>[])
+            .map((item) => {
+              const conditionType = item.conditionType === "choice" ? "choice" : "value";
+              const choiceConditions = Array.isArray(item.choiceConditions)
+                ? (item.choiceConditions as Record<string, unknown>[])
+                    .map((conditionItem) => ({
+                      id:
+                        typeof conditionItem.id === "string" && conditionItem.id
+                          ? conditionItem.id
+                          : createId("switch_cond"),
+                      choiceBlockId:
+                        typeof conditionItem.choiceBlockId === "string" && conditionItem.choiceBlockId
+                          ? conditionItem.choiceBlockId
+                          : null,
+                      choiceOptionId:
+                        typeof conditionItem.choiceOptionId === "string" && conditionItem.choiceOptionId
+                          ? conditionItem.choiceOptionId
+                          : null,
+                    }))
+                : [];
+              if (
+                conditionType === "choice" &&
+                choiceConditions.length === 0 &&
+                typeof item.choiceBlockId === "string" &&
+                item.choiceBlockId &&
+                typeof item.choiceOptionId === "string" &&
+                item.choiceOptionId
+              ) {
+                choiceConditions.push({
+                  id: createId("switch_cond"),
+                  choiceBlockId: item.choiceBlockId,
+                  choiceOptionId: item.choiceOptionId,
+                });
+              }
+
+              return {
+                id: typeof item.id === "string" && item.id ? item.id : createId("switch_case"),
+                conditionType,
+                expectedValue:
+                  typeof item.expectedValue === "number" && Number.isFinite(item.expectedValue)
+                    ? item.expectedValue
+                    : 0,
+                choiceConditions,
+                choiceBlockId:
+                  typeof item.choiceBlockId === "string" && item.choiceBlockId
+                    ? item.choiceBlockId
+                    : null,
+                choiceOptionId:
+                  typeof item.choiceOptionId === "string" && item.choiceOptionId
+                    ? item.choiceOptionId
+                    : null,
+                targetBlockId:
+                  typeof item.targetBlockId === "string" && item.targetBlockId
+                    ? item.targetBlockId
+                    : null,
+              };
+            })
         : [],
+      nextBlockId: block.nextBlockId ?? null,
     };
   }
 
@@ -1321,16 +1564,31 @@ export function getBlockOutgoingTargets(block: StoryBlock) {
   }
 
   if (block.type === "dialogue") {
-    return (block.lines ?? [])
+    const responseTargets = (block.lines ?? [])
       .flatMap((line) => line.responses)
       .map((resp) => resp.targetBlockId)
       .filter((targetId): targetId is string => Boolean(targetId));
+    const continueTargets = (block.lines ?? [])
+      .filter((line) => (line.responses ?? []).length === 0)
+      .map((line) => line.continueTargetBlockId)
+      .filter((targetId): targetId is string => Boolean(targetId));
+    return Array.from(new Set([...responseTargets, ...continueTargets]));
   }
 
   if (block.type === "choice") {
     return block.choices
       .map((choice) => choice.targetBlockId)
       .filter((targetId): targetId is string => Boolean(targetId));
+  }
+
+  if (block.type === "switch") {
+    const caseTargets = block.cases
+      .map((item) => item.targetBlockId)
+      .filter((targetId): targetId is string => Boolean(targetId));
+    const targets = block.nextBlockId
+      ? [...caseTargets, block.nextBlockId]
+      : caseTargets;
+    return Array.from(new Set(targets));
   }
 
   if (block.type === "chapter_start" || block.type === "chapter_end") {
@@ -1370,6 +1628,7 @@ export function blockTypeColor(type: BlockType) {
   if (type === "cinematic") return "#0891b2";
   if (type === "dialogue") return "#16a34a";
   if (type === "choice") return "#a855f7";
+  if (type === "switch") return "#2563eb";
   if (type === "hero_profile") return "#f59e0b";
   if (type === "npc_profile") return "#0ea5e9";
   if (type === "chapter_start") return "#059669";
@@ -1445,7 +1704,7 @@ export function validateStoryBlocks(
     if (startBlock?.type === "hero_profile" || startBlock?.type === "npc_profile") {
       issues.push({
         level: "warning",
-        message: "Le bloc de depart devrait etre un bloc narratif (titre/cinematique/dialogue/gameplay).",
+        message: "Le bloc de depart devrait etre un bloc narratif (titre/cinematique/dialogue/choix/switch/gameplay).",
         blockId: startBlockId,
       });
     }
@@ -1472,14 +1731,6 @@ export function validateStoryBlocks(
           });
         }
 
-        if (line.responses.length === 0) {
-          issues.push({
-            level: "warning",
-            message: `La ligne "${line.speaker || "?"}" n a aucune reponse.`,
-            blockId: block.id,
-          });
-        }
-
         // Validate conditions
         for (const cond of line.conditions ?? []) {
           if (cond.npcProfileBlockId) {
@@ -1499,6 +1750,14 @@ export function validateStoryBlocks(
           issues.push({
             level: "error",
             message: `Ligne de repli de "${line.speaker || "?"}" pointe vers une ligne supprimee.`,
+            blockId: block.id,
+          });
+        }
+
+        if (line.continueTargetBlockId && !blockById.has(line.continueTargetBlockId)) {
+          issues.push({
+            level: "error",
+            message: `La sortie Continuer de "${line.speaker || "?"}" pointe vers un bloc supprime.`,
             blockId: block.id,
           });
         }
@@ -1597,6 +1856,144 @@ export function validateStoryBlocks(
             blockId: block.id,
           });
         }
+
+      }
+    } else if (block.type === "switch") {
+      const valueCases = block.cases.filter((item) => item.conditionType !== "choice");
+      const choiceCases = block.cases.filter((item) => item.conditionType === "choice");
+
+      if (valueCases.length > 0 && !block.variableId) {
+        issues.push({
+          level: "warning",
+          message: "Selectionne une variable pour les cas numeriques de ce switch.",
+          blockId: block.id,
+        });
+      }
+
+      if (block.cases.length === 0) {
+        issues.push({
+          level: "warning",
+          message: "Ajoute au moins un cas dans le switch.",
+          blockId: block.id,
+        });
+      }
+
+      const seenValues = new Set<number>();
+      for (const item of valueCases) {
+        if (seenValues.has(item.expectedValue)) {
+          issues.push({
+            level: "warning",
+            message: "Deux cas du switch utilisent la meme valeur attendue.",
+            blockId: block.id,
+          });
+          break;
+        }
+        seenValues.add(item.expectedValue);
+      }
+
+      const seenChoiceCaseSignatures = new Set<string>();
+      for (const item of choiceCases) {
+        if (item.choiceConditions.length === 0) {
+          issues.push({
+            level: "warning",
+            message: "Un cas du switch en mode choix doit avoir au moins une condition.",
+            blockId: block.id,
+          });
+          continue;
+        }
+
+        const seenCaseConditionKeys = new Set<string>();
+        const caseSignatureParts: string[] = [];
+
+        for (const condition of item.choiceConditions) {
+          if (!condition.choiceBlockId) {
+            issues.push({
+              level: "warning",
+              message: "Une condition du switch n a pas de bloc choix source.",
+              blockId: block.id,
+            });
+            continue;
+          }
+
+          const sourceBlock = blockById.get(condition.choiceBlockId);
+          if (!sourceBlock) {
+            issues.push({
+              level: "error",
+              message: "Une condition du switch pointe vers un bloc choix supprime.",
+              blockId: block.id,
+            });
+            continue;
+          }
+          if (sourceBlock.type !== "choice") {
+            issues.push({
+              level: "error",
+              message: "Une condition du switch reference un bloc qui n est pas un bloc choix.",
+              blockId: block.id,
+            });
+            continue;
+          }
+
+          if (!condition.choiceOptionId) {
+            issues.push({
+              level: "warning",
+              message: "Une condition du switch n a pas d option choisie.",
+              blockId: block.id,
+            });
+            continue;
+          }
+
+          const optionExists = sourceBlock.choices.some((option) => option.id === condition.choiceOptionId);
+          if (!optionExists) {
+            issues.push({
+              level: "error",
+              message: "Une condition du switch reference une option de choix supprimee.",
+              blockId: block.id,
+            });
+            continue;
+          }
+
+          const conditionKey = `${condition.choiceBlockId}:${condition.choiceOptionId}`;
+          if (seenCaseConditionKeys.has(conditionKey)) {
+            issues.push({
+              level: "warning",
+              message: "Un cas du switch contient deux fois la meme condition.",
+              blockId: block.id,
+            });
+            continue;
+          }
+          seenCaseConditionKeys.add(conditionKey);
+          caseSignatureParts.push(conditionKey);
+        }
+
+        const caseSignature = caseSignatureParts.sort().join(" && ");
+        if (!caseSignature) continue;
+        if (seenChoiceCaseSignatures.has(caseSignature)) {
+          issues.push({
+            level: "warning",
+            message: "Deux cas du switch utilisent exactement le meme ensemble de conditions.",
+            blockId: block.id,
+          });
+          break;
+        }
+        seenChoiceCaseSignatures.add(caseSignature);
+      }
+
+      for (const item of block.cases) {
+        if (item.targetBlockId && !blockById.has(item.targetBlockId)) {
+          issues.push({
+            level: "error",
+            message: "Un cas du switch pointe vers un bloc supprime.",
+            blockId: block.id,
+          });
+        }
+      }
+
+      if (block.nextBlockId && !blockById.has(block.nextBlockId)) {
+        issues.push({
+          level: "error",
+          message: "La sortie Sinon du switch pointe vers un bloc supprime.",
+          blockId: block.id,
+        });
       }
     } else if (block.type === "npc_profile") {
       if (!block.npcName.trim()) {
@@ -1760,6 +2157,7 @@ export function validateStoryBlocks(
     if (
       block.type !== "dialogue" &&
       block.type !== "choice" &&
+      block.type !== "switch" &&
       block.type !== "hero_profile" &&
       block.type !== "npc_profile" &&
       block.nextBlockId &&

@@ -12,7 +12,16 @@ import {
 } from "@xyflow/react";
 
 import { HelpHint } from "@/components/HelpHint";
-import { BLOCK_LABELS, ChapterStartBlock, ChoiceBlock, DialogueBlock, GameplayBlock, StoryBlock, blockTypeColor } from "@/lib/story";
+import {
+  BLOCK_LABELS,
+  ChapterStartBlock,
+  ChoiceBlock,
+  DialogueBlock,
+  GameplayBlock,
+  StoryBlock,
+  SwitchBlock,
+  blockTypeColor,
+} from "@/lib/story";
 
 export interface StoryNodeData {
   [key: string]: unknown;
@@ -30,7 +39,7 @@ type StoryEditorNode = Node<StoryNodeData>;
 function DialogueOutputs({ block }: { block: DialogueBlock }) {
   return (
     <div className="story-node-dialogue-outputs">
-      {block.lines.map((line) => (
+      {block.lines.map((line, lineIndex) => (
         <div key={line.id} className="story-node-dialogue-line-group">
           <div className="story-node-dialogue-line-header">
             <Handle
@@ -57,6 +66,34 @@ function DialogueOutputs({ block }: { block: DialogueBlock }) {
               />
             </div>
           ))}
+          {line.responses.length === 0 && block.lines[lineIndex + 1] && (
+            <div className="story-node-choice-row">
+              <span className="story-node-choice-label">▶</span>
+              <span className="story-node-choice-text">Continuer auto</span>
+              <Handle
+                type="source"
+                id={`line-next-${line.id}`}
+                position={Position.Right}
+                className="story-node-handle"
+              />
+            </div>
+          )}
+          {line.responses.length === 0 && (
+            <div className="story-node-choice-row">
+              <span className="story-node-choice-label">&gt;&gt;</span>
+              <span className="story-node-choice-text">
+                {line.continueTargetBlockId
+                  ? "Continuer -> bloc"
+                  : "Continuer -> sortie"}
+              </span>
+              <Handle
+                type="source"
+                id={`line-continue-${line.id}`}
+                position={Position.Right}
+                className="story-node-handle"
+              />
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -132,6 +169,39 @@ function GameplayOutputs({ block }: { block: GameplayBlock }) {
   );
 }
 
+function SwitchOutputs({ block }: { block: SwitchBlock }) {
+  return (
+    <div className="story-node-dialogue-outputs">
+      {block.cases.map((item, index) => (
+        <div key={item.id} className="story-node-choice-row">
+          <span className="story-node-choice-label">C{index + 1}</span>
+          <span className="story-node-choice-text">
+            {item.conditionType === "choice"
+              ? `Choix x${item.choiceConditions.length || 1}`
+              : `= ${item.expectedValue}`}
+          </span>
+          <Handle
+            type="source"
+            id={`switch-case-${item.id}`}
+            position={Position.Right}
+            className="story-node-handle"
+          />
+        </div>
+      ))}
+      <div className="story-node-choice-row">
+        <span className="story-node-choice-label">Else</span>
+        <span className="story-node-choice-text">Sinon</span>
+        <Handle
+          type="source"
+          id="switch-default"
+          position={Position.Right}
+          className="story-node-handle"
+        />
+      </div>
+    </div>
+  );
+}
+
 function blockSummary(block: StoryBlock) {
   if (block.type === "title") return block.storyTitle || "Titre vide";
   if (block.type === "cinematic") return block.heading || "Cinematique";
@@ -140,6 +210,7 @@ function blockSummary(block: StoryBlock) {
     return first ? `${first.speaker}: ${first.text || "..."}` : "Dialogue vide";
   }
   if (block.type === "choice") return block.prompt.trim() || "Choix vide";
+  if (block.type === "switch") return `${block.cases.length} cas`;
   if (block.type === "chapter_start") return block.chapterTitle || "Chapitre sans titre";
   if (block.type === "chapter_end") return "Sortie de chapitre";
   if (block.type === "hero_profile") return "Fiche du hero (visuel)";
@@ -161,6 +232,9 @@ function blockHelp(block: StoryBlock) {
   }
   if (block.type === "choice") {
     return "Bloc de decision: le joueur choisit un chemin parmi plusieurs options (sans dialogue).";
+  }
+  if (block.type === "switch") {
+    return "Bloc de routage conditionnel: evalue une variable et redirige vers le premier cas correspondant.";
   }
   if (block.type === "chapter_start") {
     return "Debut de chapitre: point d'entree, avec un bouton pour reduire tout le chapitre sur le whiteboard.";
@@ -317,6 +391,8 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
         <ChoiceOutputs block={data.block} />
       ) : data.block.type === "gameplay" ? (
         <GameplayOutputs block={data.block} />
+      ) : data.block.type === "switch" ? (
+        <SwitchOutputs block={data.block} />
       ) : data.block.type === "npc_profile" ? (
         <NpcProfileOutput />
       ) : data.block.type === "hero_profile" ? (

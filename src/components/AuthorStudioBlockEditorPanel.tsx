@@ -3,6 +3,7 @@ import { ChangeEvent, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode, 
 import {
   GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE,
   GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE,
+  SWITCH_DEFAULT_HANDLE,
   normalizeDelta,
 } from "@/components/author-studio-core";
 import { GameplayPlacementTarget } from "@/components/author-studio-types";
@@ -29,6 +30,7 @@ import {
   SceneLayout,
   SceneLayerLayout,
   StoryBlock,
+  SwitchBlock,
   TitleBlock,
   ValidationIssue,
   createId,
@@ -45,7 +47,7 @@ interface DialogueSceneClipboard {
 /** Module-level clipboard ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â persists across block selections within the session. */
 let dialogueSceneClipboard: DialogueSceneClipboard | null = null;
 
-type ChoiceField = "text" | "targetBlockId";
+type ChoiceField = "text" | "targetBlockId" | "heroMemoryVariableId" | "heroMemoryValue";
 type EffectField = "variableId" | "delta";
 type RectField = "x" | "y" | "width" | "height";
 type ResponseField = "text" | "targetLineId" | "targetBlockId";
@@ -55,6 +57,7 @@ interface AuthorStudioBlockEditorPanelProps {
   canEdit: boolean;
   project: ProjectMeta;
   blocks: StoryBlock[];
+  chapterEndOptionsByChapterId: Record<string, ChapterEndBlock[]>;
   visibleIssues: ValidationIssue[];
   onDeleteSelectedBlock: () => void;
   onDuplicateSelectedBlock: () => void;
@@ -124,6 +127,12 @@ interface AuthorStudioBlockEditorPanelProps {
   onRegisterAsset: (file: File) => string;
   onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
   onStatusMessage: (message: string) => void;
+  onSetChapterValidationFromEnd: (chapterEndBlockId: string, validated: boolean) => void;
+  onSetChapterStartPreviousLink: (
+    chapterStartBlockId: string,
+    previousChapterId: string | null,
+    previousChapterEndBlockId: string | null,
+  ) => void;
 }
 
 interface NextBlockSelectProps {
@@ -316,6 +325,8 @@ interface CinematicEditorSectionProps {
   onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
   onAssetInput: (fieldName: string) => (event: ChangeEvent<HTMLInputElement>) => void;
   renderAssetAttachment: (fieldName: string, assetId: string | null) => ReactNode;
+  onRegisterAsset: (file: File) => string;
+  onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
   onStatusMessage: (message: string) => void;
 }
 
@@ -329,15 +340,28 @@ function CinematicEditorSection({
   onSetConnection,
   onAssetInput,
   renderAssetAttachment,
+  onRegisterAsset,
+  onEnsureAssetPreviewSrc,
   onStatusMessage,
 }: CinematicEditorSectionProps) {
+  const layers = block.characterLayers ?? [];
+
+  const withLegacyCharacterAsset = useCallback((nextLayers: CharacterLayer[]) => {
+    const legacyCharacterAssetId =
+      nextLayers.find((layer) => layer.assetId)?.assetId ?? null;
+    return {
+      characterLayers: nextLayers,
+      characterAssetId: legacyCharacterAssetId,
+    };
+  }, []);
+
   return (
     <div className="subsection">
       <div className="title-with-help">
         <h3>Bloc cinematique</h3>
         <HelpHint title="Bloc cinematique">
           Permet de raconter une scene avec texte, image/video/voix puis d&apos;avancer vers
-          un autre bloc. Tu peux aussi ajouter un personnage et positionner la scene.
+          un autre bloc. Tu peux aussi composer une scene multi-personnages.
         </HelpHint>
       </div>
       <label>
@@ -391,33 +415,168 @@ function CinematicEditorSection({
         />
       </label>
       {renderAssetAttachment("backgroundAssetId", block.backgroundAssetId)}
-      <label>
-        Image personnage
-        <input
-          type="file"
-          accept="image/*"
-          onChange={onAssetInput("characterAssetId")}
-          disabled={!canEdit}
-        />
-      </label>
-      {renderAssetAttachment("characterAssetId", block.characterAssetId)}
+
+      <div className="section-title-row">
+        <div className="title-with-help">
+          <h3>Personnages ({layers.length}/5)</h3>
+          <HelpHint title="Personnages">
+            Ajoute jusqu&apos;a 5 images. Le cran (1-5) determine le plan : 1 = premier plan,
+            5 = arriere-plan.
+          </HelpHint>
+        </div>
+        {layers.length < 5 && (
+          <label className="button-secondary" style={{ cursor: "pointer", margin: 0 }}>
+            + personnage
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                if (!canEdit) return;
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const assetId = onRegisterAsset(file);
+                void onEnsureAssetPreviewSrc(assetId);
+                const newLayer: CharacterLayer = {
+                  id: createId("clayer"),
+                  assetId,
+                  label: `Perso ${layers.length + 1}`,
+                  zIndex: Math.min(layers.length + 1, 5),
+                  layout: { ...DEFAULT_CHARACTER_LAYOUT },
+                };
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "cinematic") return b;
+                  const nextLayers = [...(b.characterLayers ?? []), newLayer];
+                  return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+                });
+                onStatusMessage(`Personnage ajoute: ${file.name}`);
+                event.target.value = "";
+              }}
+              disabled={!canEdit}
+            />
+          </label>
+        )}
+      </div>
+      {layers.length === 0 && (
+        <small className="empty-placeholder">Aucun personnage. Clique &quot;+ personnage&quot; pour en ajouter.</small>
+      )}
+      {layers.map((layer, layerIdx) => (
+        <div key={layer.id} className="choice-card" style={{ padding: "6px 8px" }}>
+          <div className="effect-row" style={{ gridTemplateColumns: "1fr 80px 28px", alignItems: "center" }}>
+            <input
+              type="text"
+              value={layer.label}
+              placeholder="Nom"
+              onChange={(event) =>
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "cinematic") return b;
+                  const nextLayers = (b.characterLayers ?? []).map((l, i) =>
+                    i !== layerIdx ? l : { ...l, label: event.target.value },
+                  );
+                  return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+                })
+              }
+              disabled={!canEdit}
+            />
+            <select
+              value={layer.zIndex}
+              onChange={(event) =>
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "cinematic") return b;
+                  const nextLayers = (b.characterLayers ?? []).map((l, i) =>
+                    i !== layerIdx ? l : { ...l, zIndex: Number(event.target.value) },
+                  );
+                  return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+                })
+              }
+              disabled={!canEdit}
+            >
+              <option value={1}>Cran 1</option>
+              <option value={2}>Cran 2</option>
+              <option value={3}>Cran 3</option>
+              <option value={4}>Cran 4</option>
+              <option value={5}>Cran 5</option>
+            </select>
+            <button
+              className="button-danger"
+              onClick={() =>
+                onUpdateSelectedBlock((b) => {
+                  if (b.type !== "cinematic") return b;
+                  const nextLayers = (b.characterLayers ?? []).filter((_, i) => i !== layerIdx);
+                  return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+                })
+              }
+              disabled={!canEdit}
+              title="Retirer ce personnage"
+            >
+              x
+            </button>
+          </div>
+          <div className="asset-line">
+            <small>{assetPreviewSrcById[layer.assetId ?? ""] ? "Image chargee" : "Aucune image"}</small>
+            <label className="button-secondary" style={{ cursor: "pointer", margin: 0, fontSize: "0.75rem" }}>
+              Changer
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  if (!canEdit) return;
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  const assetId = onRegisterAsset(file);
+                  void onEnsureAssetPreviewSrc(assetId);
+                  onUpdateSelectedBlock((b) => {
+                    if (b.type !== "cinematic") return b;
+                    const nextLayers = (b.characterLayers ?? []).map((l, i) =>
+                      i !== layerIdx ? l : { ...l, assetId },
+                    );
+                    return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+                  });
+                  event.target.value = "";
+                }}
+                disabled={!canEdit}
+              />
+            </label>
+          </div>
+        </div>
+      ))}
 
       {/* --- Scene Composer --- */}
       {(() => {
         const bgSrc = assetPreviewSrcById[block.backgroundAssetId ?? ""];
-        const charSrc = assetPreviewSrcById[block.characterAssetId ?? ""];
-        const hasAnyAsset = block.backgroundAssetId || block.characterAssetId;
+        const layerSrcs = layers
+          .map((layer, idx) => ({
+            key: layer.id,
+            label: layer.label || `Perso ${idx + 1}`,
+            src: assetPreviewSrcById[layer.assetId ?? ""],
+            zIndex: layer.zIndex,
+            layout: layer.layout,
+          }))
+          .filter((item) => item.src);
+        const fallbackCharSrc = assetPreviewSrcById[block.characterAssetId ?? ""];
+        const hasAnyAsset = block.backgroundAssetId || layerSrcs.length > 0 || block.characterAssetId;
         if (!hasAnyAsset) return null;
         return (
           <SceneComposer
             layout={block.sceneLayout}
             bgSrc={bgSrc}
-            charSrc={charSrc}
+            characterLayers={layerSrcs}
+            charSrc={fallbackCharSrc}
             canEdit={canEdit}
             onChange={(newLayout) => {
               onUpdateSelectedBlock((b) =>
                 b.type === "cinematic" ? { ...b, sceneLayout: newLayout } : b,
               );
+            }}
+            onChangeCharacterLayout={(layerId, newLayerLayout) => {
+              onUpdateSelectedBlock((b) => {
+                if (b.type !== "cinematic") return b;
+                const nextLayers = (b.characterLayers ?? []).map((l) =>
+                  l.id !== layerId ? l : { ...l, layout: newLayerLayout },
+                );
+                return { ...b, ...withLegacyCharacterAsset(nextLayers) };
+              });
             }}
           />
         );
@@ -478,7 +637,10 @@ function SceneCopyPaste({
     dialogueSceneClipboard = {
       backgroundAssetId: block.backgroundAssetId,
       characterAssetId: block.type !== "gameplay" ? block.characterAssetId : null,
-      characterLayers: block.type === "dialogue" ? structuredClone(block.characterLayers ?? []) : [],
+      characterLayers:
+        block.type === "dialogue" || block.type === "cinematic"
+          ? structuredClone(block.characterLayers ?? [])
+          : [],
       sceneLayout: structuredClone(block.sceneLayout),
     };
     setHasClipboard(true);
@@ -498,10 +660,13 @@ function SceneCopyPaste({
         };
       }
       if (b.type === "cinematic") {
+        const legacyCharacterAssetId =
+          clip.characterAssetId ?? clip.characterLayers.find((layer) => layer.assetId)?.assetId ?? null;
         return {
           ...b,
           backgroundAssetId: clip.backgroundAssetId,
-          characterAssetId: clip.characterAssetId,
+          characterAssetId: legacyCharacterAssetId,
+          characterLayers: structuredClone(clip.characterLayers),
           sceneLayout: structuredClone(clip.sceneLayout),
         };
       }
@@ -1340,6 +1505,12 @@ function DialogueEditorSection({
               </button>
             </div>
           </div>
+          {line.responses.length === 0 && (
+            <small className="empty-placeholder">
+              Aucune reponse: la preview affichera un bouton Continuer.
+              Utilise la sortie "Continuer vers sortie" sur le whiteboard pour le relier a un autre bloc.
+            </small>
+          )}
 
           {line.responses.map((resp) => (
             <div key={resp.id} className="choice-card" style={{ marginLeft: 12 }}>
@@ -1348,7 +1519,7 @@ function DialogueEditorSection({
                 <button
                   className="button-danger"
                   onClick={() => onRemoveDialogueLineResponse(line.id, resp.id)}
-                  disabled={!canEdit || line.responses.length <= 1}
+                  disabled={!canEdit}
                   title="Supprimer cette reponse"
                 >
                   x
@@ -1624,6 +1795,7 @@ interface ChoiceEditorSectionProps {
   blocks: StoryBlock[];
   project: ProjectMeta;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
+  onUpdateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
   onAssetInput: (fieldName: string) => (event: ChangeEvent<HTMLInputElement>) => void;
   renderAssetAttachment: (fieldName: string, assetId: string | null) => ReactNode;
   renderAssetAttachmentWithRemove: (assetId: string | null, onRemove: () => void) => ReactNode;
@@ -1641,6 +1813,9 @@ interface ChoiceEditorSectionProps {
     value: string,
   ) => void;
   onRemoveChoiceEffect: (choiceId: string, effectIndex: number) => void;
+  onRegisterAsset: (file: File) => string;
+  onEnsureAssetPreviewSrc: (assetId: string) => Promise<string | null>;
+  onStatusMessage: (message: string) => void;
   assetPreviewSrcById: Record<string, string>;
 }
 
@@ -1650,6 +1825,7 @@ function ChoiceEditorSection({
   blocks,
   project,
   onSetSelectedDynamicField,
+  onUpdateSelectedBlock,
   onAssetInput,
   renderAssetAttachment,
   renderAssetAttachmentWithRemove,
@@ -1662,8 +1838,34 @@ function ChoiceEditorSection({
   onAddChoiceEffect,
   onUpdateChoiceEffect,
   onRemoveChoiceEffect,
+  onRegisterAsset,
+  onEnsureAssetPreviewSrc,
+  onStatusMessage,
   assetPreviewSrcById,
 }: ChoiceEditorSectionProps) {
+  const choiceVisualSceneLayers = block.choices
+    .map((option) => ({
+      key: option.id,
+      label: `Option ${option.label}`,
+      src: assetPreviewSrcById[option.imageAssetId ?? ""],
+      zIndex: option.zIndex,
+      layout: option.layout,
+    }))
+    .filter((layer) => layer.src);
+  const isTextChoiceMode = block.displayMode === "text";
+  const choiceTextLayers = block.characterLayers ?? [];
+  const choiceTextSceneLayers = choiceTextLayers
+    .map((layer, idx) => ({
+      key: layer.id,
+      label: layer.label || `Perso ${idx + 1}`,
+      src: assetPreviewSrcById[layer.assetId ?? ""],
+      zIndex: layer.zIndex,
+      layout: layer.layout,
+    }))
+    .filter((layer) => layer.src);
+  const currentSceneLayers = isTextChoiceMode ? choiceTextSceneLayers : choiceVisualSceneLayers;
+  const hasSceneAssets = Boolean(block.backgroundAssetId) || currentSceneLayers.length > 0;
+
   return (
     <div className="subsection">
       <div className="title-with-help">
@@ -1673,6 +1875,25 @@ function ChoiceEditorSection({
           option peut modifier des variables et brancher vers un bloc different.
         </HelpHint>
       </div>
+      <label>
+        Type de choix
+        <select
+          value={block.displayMode}
+          onChange={(event) =>
+            onSetSelectedDynamicField(
+              "displayMode",
+              event.target.value === "text" ? "text" : "visual",
+            )
+          }
+          disabled={!canEdit}
+        >
+          <option value="text">Texte (type dialogue)</option>
+          <option value="visual">Visuel (images cliquables)</option>
+        </select>
+      </label>
+      <small className="empty-placeholder">
+        Le choix du joueur est memorise automatiquement pour toute la partie.
+      </small>
       <label>
         Situation / Prompt
         <textarea
@@ -1703,6 +1924,197 @@ function ChoiceEditorSection({
         />
       </label>
       {renderAssetAttachment("voiceAssetId", block.voiceAssetId)}
+
+      <div className="section-title-row">
+        <div className="title-with-help">
+          <h3>{isTextChoiceMode ? "Composition de scene" : "Scene interactive"}</h3>
+          <HelpHint title={isTextChoiceMode ? "Scene narrative (mode texte)" : "Scene de choix"}>
+            {isTextChoiceMode
+              ? "Meme editeur que Dialogue: les PNJ sont decoratifs et les choix restent des boutons texte."
+              : "Positionne et redimensionne les images de choix. Chaque image devient un bouton cliquable en preview."}
+          </HelpHint>
+        </div>
+      </div>
+
+      {isTextChoiceMode && (
+        <>
+          <div className="section-title-row">
+            <div className="title-with-help">
+              <h3>Personnages ({choiceTextLayers.length}/5)</h3>
+              <HelpHint title="Personnages">
+                Ajoute jusqu&apos;a 5 personnages independants des options de choix.
+              </HelpHint>
+            </div>
+            {choiceTextLayers.length < 5 && (
+              <label className="button-secondary" style={{ cursor: "pointer", margin: 0 }}>
+                + personnage
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(event) => {
+                    if (!canEdit) return;
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    const assetId = onRegisterAsset(file);
+                    void onEnsureAssetPreviewSrc(assetId);
+                    const newLayer: CharacterLayer = {
+                      id: createId("clayer"),
+                      assetId,
+                      label: `Perso ${choiceTextLayers.length + 1}`,
+                      zIndex: Math.min(choiceTextLayers.length + 1, 5),
+                      layout: { ...DEFAULT_CHARACTER_LAYOUT },
+                    };
+                    onUpdateSelectedBlock((candidate) =>
+                      candidate.type === "choice"
+                        ? { ...candidate, characterLayers: [...(candidate.characterLayers ?? []), newLayer] }
+                        : candidate,
+                    );
+                    onStatusMessage(`Personnage ajoute: ${file.name}`);
+                    event.target.value = "";
+                  }}
+                  disabled={!canEdit}
+                />
+              </label>
+            )}
+          </div>
+          {choiceTextLayers.length === 0 && (
+            <small className="empty-placeholder">
+              Aucun personnage. Clique &quot;+ personnage&quot; pour en ajouter.
+            </small>
+          )}
+          {choiceTextLayers.map((layer, layerIdx) => (
+            <div key={layer.id} className="choice-card" style={{ padding: "6px 8px" }}>
+              <div className="effect-row" style={{ gridTemplateColumns: "1fr 80px 28px", alignItems: "center" }}>
+                <input
+                  type="text"
+                  value={layer.label}
+                  placeholder="Nom"
+                  onChange={(event) =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "choice") return candidate;
+                      return {
+                        ...candidate,
+                        characterLayers: (candidate.characterLayers ?? []).map((currentLayer, idx) =>
+                          idx !== layerIdx ? currentLayer : { ...currentLayer, label: event.target.value },
+                        ),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                />
+                <select
+                  value={layer.zIndex}
+                  onChange={(event) =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "choice") return candidate;
+                      return {
+                        ...candidate,
+                        characterLayers: (candidate.characterLayers ?? []).map((currentLayer, idx) =>
+                          idx !== layerIdx ? currentLayer : { ...currentLayer, zIndex: Number(event.target.value) },
+                        ),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                >
+                  <option value={1}>Cran 1</option>
+                  <option value={2}>Cran 2</option>
+                  <option value={3}>Cran 3</option>
+                  <option value={4}>Cran 4</option>
+                  <option value={5}>Cran 5</option>
+                </select>
+                <button
+                  className="button-danger"
+                  onClick={() =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "choice") return candidate;
+                      return {
+                        ...candidate,
+                        characterLayers: (candidate.characterLayers ?? []).filter((_, idx) => idx !== layerIdx),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                  title="Retirer ce personnage"
+                >
+                  x
+                </button>
+              </div>
+              <div className="asset-line">
+                <small>{assetPreviewSrcById[layer.assetId ?? ""] ? "Image chargee" : "Aucune image"}</small>
+                <label className="button-secondary" style={{ cursor: "pointer", margin: 0, fontSize: "0.75rem" }}>
+                  Changer
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={(event) => {
+                      if (!canEdit) return;
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      const assetId = onRegisterAsset(file);
+                      void onEnsureAssetPreviewSrc(assetId);
+                      onUpdateSelectedBlock((candidate) => {
+                        if (candidate.type !== "choice") return candidate;
+                        return {
+                          ...candidate,
+                          characterLayers: (candidate.characterLayers ?? []).map((currentLayer, idx) =>
+                            idx !== layerIdx ? currentLayer : { ...currentLayer, assetId },
+                          ),
+                        };
+                      });
+                      event.target.value = "";
+                    }}
+                    disabled={!canEdit}
+                  />
+                </label>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {!hasSceneAssets ? (
+        <small className="empty-placeholder">
+          Ajoute un fond ou un personnage pour activer la composition de scene.
+        </small>
+      ) : (
+        <SceneComposer
+          layout={block.sceneLayout}
+          bgSrc={assetPreviewSrcById[block.backgroundAssetId ?? ""]}
+          characterLayers={currentSceneLayers}
+          canEdit={canEdit}
+          onChange={(nextSceneLayout) =>
+            onUpdateSelectedBlock((candidate) =>
+              candidate.type === "choice"
+                ? { ...candidate, sceneLayout: nextSceneLayout }
+                : candidate,
+            )
+          }
+          onChangeCharacterLayout={(layerId, layout) =>
+            onUpdateSelectedBlock((candidate) => {
+              if (candidate.type !== "choice") return candidate;
+              if (isTextChoiceMode) {
+                return {
+                  ...candidate,
+                  characterLayers: (candidate.characterLayers ?? []).map((layer) =>
+                    layer.id !== layerId ? layer : { ...layer, layout },
+                  ),
+                };
+              }
+              return {
+                ...candidate,
+                choices: candidate.choices.map((candidateOption) =>
+                  candidateOption.id === layerId
+                    ? { ...candidateOption, layout }
+                    : candidateOption,
+                ),
+              };
+            })
+          }
+        />
+      )}
 
       <div className="section-title-row">
         <div className="title-with-help">
@@ -1775,9 +2187,38 @@ function ChoiceEditorSection({
             <img
               src={assetPreviewSrcById[option.imageAssetId]}
               alt={`Option ${option.label}`}
-              className="asset-preview-thumb"
+              className="choice-option-inline-preview"
             />
           )}
+          <label>
+            Plan (cran)
+            <select
+              value={option.zIndex}
+              onChange={(event) =>
+                onUpdateSelectedBlock((candidate) => {
+                  if (candidate.type !== "choice") return candidate;
+                  return {
+                    ...candidate,
+                    choices: candidate.choices.map((candidateOption) =>
+                      candidateOption.id === option.id
+                        ? {
+                            ...candidateOption,
+                            zIndex: Math.min(5, Math.max(1, Number(event.target.value) || 1)),
+                          }
+                        : candidateOption,
+                    ),
+                  };
+                })
+              }
+              disabled={!canEdit}
+            >
+              <option value={1}>Cran 1</option>
+              <option value={2}>Cran 2</option>
+              <option value={3}>Cran 3</option>
+              <option value={4}>Cran 4</option>
+              <option value={5}>Cran 5</option>
+            </select>
+          </label>
           <label>
             Cible bloc
             <select
@@ -1802,6 +2243,51 @@ function ChoiceEditorSection({
                 ))}
             </select>
           </label>
+
+          <div className="effect-list">
+            <div className="section-title-row">
+              <div className="title-with-help">
+                <span>Memoire hero</span>
+                <HelpHint title="Memoire de choix">
+                  Optionnel: enregistre une valeur de choix dans une variable "choix_*".
+                </HelpHint>
+              </div>
+            </div>
+            <label>
+              Variable memoire
+              <select
+                value={option.heroMemoryVariableId ?? ""}
+                onChange={(event) =>
+                  onUpdateChoiceField(option.id, "heroMemoryVariableId", event.target.value)
+                }
+                disabled={!canEdit}
+              >
+                <option value="">Aucune</option>
+                {project.variables
+                  .filter((variable) =>
+                    variable.name.trim().toLowerCase().startsWith("choix_"),
+                  )
+                  .map((variable) => (
+                    <option key={variable.id} value={variable.id}>
+                      {variable.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {option.heroMemoryVariableId && (
+              <label>
+                Valeur memoire
+                <input
+                  type="number"
+                  value={option.heroMemoryValue}
+                  onChange={(event) =>
+                    onUpdateChoiceField(option.id, "heroMemoryValue", event.target.value)
+                  }
+                  disabled={!canEdit}
+                />
+              </label>
+            )}
+          </div>
 
           <div className="effect-list">
             <div className="section-title-row">
@@ -1854,6 +2340,396 @@ function ChoiceEditorSection({
           </div>
         </div>
       ))}
+
+    </div>
+  );
+}
+
+interface SwitchEditorSectionProps {
+  block: SwitchBlock;
+  canEdit: boolean;
+  blocks: StoryBlock[];
+  project: ProjectMeta;
+  onUpdateSelectedBlock: (updater: (block: StoryBlock) => StoryBlock) => void;
+  onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
+}
+
+function SwitchEditorSection({
+  block,
+  canEdit,
+  blocks,
+  project,
+  onUpdateSelectedBlock,
+  onSetConnection,
+}: SwitchEditorSectionProps) {
+  const linkableBlocks = blocks.filter(
+    (candidate) =>
+      candidate.id !== block.id &&
+      candidate.type !== "hero_profile" &&
+      candidate.type !== "npc_profile",
+  );
+  const choiceBlocks = blocks.filter((candidate): candidate is ChoiceBlock => candidate.type === "choice");
+  const choiceBlockById = new Map(choiceBlocks.map((choiceBlock) => [choiceBlock.id, choiceBlock]));
+  const hasValueCases = block.cases.some((item) => item.conditionType !== "choice");
+  const defaultChoiceCondition = () => ({
+    id: createId("switch_cond"),
+    choiceBlockId: choiceBlocks[0]?.id ?? null,
+    choiceOptionId: choiceBlocks[0]?.choices[0]?.id ?? null,
+  });
+  const withLegacyChoiceReference = (
+    caseItem: SwitchBlock["cases"][number],
+    conditions: SwitchBlock["cases"][number]["choiceConditions"],
+  ) => ({
+    ...caseItem,
+    choiceConditions: conditions,
+    choiceBlockId: conditions[0]?.choiceBlockId ?? null,
+    choiceOptionId: conditions[0]?.choiceOptionId ?? null,
+  });
+
+  return (
+    <div className="subsection">
+      <div className="title-with-help">
+        <h3>Bloc switch</h3>
+        <HelpHint title="Routage conditionnel">
+          Redirige selon des cas. Chaque cas peut comparer une valeur de variable ou un choix
+          memorise (bloc choix + option).
+        </HelpHint>
+      </div>
+      <label>
+        Variable evaluee (cas numeriques)
+        <select
+          value={block.variableId ?? ""}
+          onChange={(event) =>
+            onUpdateSelectedBlock((candidate) => {
+              if (candidate.type !== "switch") return candidate;
+              return {
+                ...candidate,
+                variableId: event.target.value || null,
+              };
+            })
+          }
+          disabled={!canEdit}
+        >
+          <option value="">Aucune variable</option>
+          {project.variables.map((variable) => (
+            <option key={variable.id} value={variable.id}>
+              {variable.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {!hasValueCases && (
+        <small className="help-text">
+          Aucun cas numerique actif: cette variable n est pas utilisee.
+        </small>
+      )}
+
+      <div className="section-title-row">
+        <div className="title-with-help">
+          <h3>Cas</h3>
+          <HelpHint title="Cas switch">
+            Les cas sont evalues de haut en bas. Le premier qui correspond est utilise.
+          </HelpHint>
+        </div>
+        <button
+          className="button-secondary"
+          onClick={() =>
+            onUpdateSelectedBlock((candidate) => {
+              if (candidate.type !== "switch") return candidate;
+              return {
+                ...candidate,
+                cases: [
+                  ...candidate.cases,
+                  {
+                    id: createId("switch_case"),
+                    conditionType: choiceBlocks.length > 0 ? "choice" : "value",
+                    expectedValue: 0,
+                    choiceConditions: choiceBlocks.length > 0 ? [defaultChoiceCondition()] : [],
+                    choiceBlockId: choiceBlocks[0]?.id ?? null,
+                    choiceOptionId: choiceBlocks[0]?.choices[0]?.id ?? null,
+                    targetBlockId: null,
+                  },
+                ],
+              };
+            })
+          }
+          disabled={!canEdit}
+        >
+          + cas
+        </button>
+      </div>
+
+      {block.cases.length === 0 && (
+        <small className="empty-placeholder">Ajoute au moins un cas.</small>
+      )}
+
+      {block.cases.map((item, index) => (
+        <div key={item.id} className="choice-card">
+          <div className="section-title-row">
+            <strong>Cas {index + 1}</strong>
+            <button
+              className="button-danger"
+              onClick={() => {
+                onSetConnection(block.id, `switch-case-${item.id}`, null);
+                onUpdateSelectedBlock((candidate) => {
+                  if (candidate.type !== "switch") return candidate;
+                  return {
+                    ...candidate,
+                    cases: candidate.cases.filter((candidateCase) => candidateCase.id !== item.id),
+                  };
+                });
+              }}
+              disabled={!canEdit}
+            >
+              x
+            </button>
+          </div>
+          <label>
+            Condition
+            <select
+              value={item.conditionType}
+              onChange={(event) =>
+                onUpdateSelectedBlock((candidate) => {
+                  if (candidate.type !== "switch") return candidate;
+                  return {
+                    ...candidate,
+                    cases: candidate.cases.map((candidateCase) => {
+                      if (candidateCase.id !== item.id) return candidateCase;
+                      const nextConditionType =
+                        event.target.value === "choice" ? "choice" : "value";
+                      if (nextConditionType === "choice") {
+                        const nextConditions =
+                          candidateCase.choiceConditions.length > 0
+                            ? candidateCase.choiceConditions
+                            : [defaultChoiceCondition()];
+                        return withLegacyChoiceReference(
+                          {
+                            ...candidateCase,
+                            conditionType: "choice",
+                          },
+                          nextConditions,
+                        );
+                      }
+                      return {
+                        ...candidateCase,
+                        conditionType: "value",
+                        choiceConditions: [],
+                        choiceBlockId: null,
+                        choiceOptionId: null,
+                      };
+                    }),
+                  };
+                })
+              }
+              disabled={!canEdit}
+            >
+              <option value="choice">Choix memorise</option>
+              <option value="value">Valeur variable</option>
+            </select>
+          </label>
+
+          {item.conditionType === "choice" ? (
+            <>
+              <div className="section-title-row">
+                <div className="title-with-help">
+                  <span>Conditions (ET)</span>
+                  <HelpHint title="Conditions multiples">
+                    Toutes les conditions de ce cas doivent etre vraies pour activer la cible.
+                  </HelpHint>
+                </div>
+                <button
+                  className="button-secondary"
+                  onClick={() =>
+                    onUpdateSelectedBlock((candidate) => {
+                      if (candidate.type !== "switch") return candidate;
+                      return {
+                        ...candidate,
+                        cases: candidate.cases.map((candidateCase) => {
+                          if (candidateCase.id !== item.id) return candidateCase;
+                          const nextConditions = [
+                            ...candidateCase.choiceConditions,
+                            defaultChoiceCondition(),
+                          ];
+                          return withLegacyChoiceReference(candidateCase, nextConditions);
+                        }),
+                      };
+                    })
+                  }
+                  disabled={!canEdit}
+                >
+                  + condition
+                </button>
+              </div>
+
+              {item.choiceConditions.length === 0 && (
+                <small className="empty-placeholder">
+                  Ajoute au moins une condition.
+                </small>
+              )}
+
+              {item.choiceConditions.map((condition, conditionIndex) => {
+                const sourceChoices = condition.choiceBlockId
+                  ? choiceBlockById.get(condition.choiceBlockId)?.choices ?? []
+                  : [];
+
+                return (
+                  <div key={condition.id} className="effect-row">
+                    <select
+                      value={condition.choiceBlockId ?? ""}
+                      onChange={(event) =>
+                        onUpdateSelectedBlock((candidate) => {
+                          if (candidate.type !== "switch") return candidate;
+                          return {
+                            ...candidate,
+                            cases: candidate.cases.map((candidateCase) => {
+                              if (candidateCase.id !== item.id) return candidateCase;
+                              const nextConditions = candidateCase.choiceConditions.map((candidateCondition) => {
+                                if (candidateCondition.id !== condition.id) return candidateCondition;
+                                const nextChoiceBlockId = event.target.value || null;
+                                const nextChoiceBlock = nextChoiceBlockId
+                                  ? choiceBlockById.get(nextChoiceBlockId) ?? null
+                                  : null;
+                                return {
+                                  ...candidateCondition,
+                                  choiceBlockId: nextChoiceBlockId,
+                                  choiceOptionId: nextChoiceBlock?.choices[0]?.id ?? null,
+                                };
+                              });
+                              return withLegacyChoiceReference(candidateCase, nextConditions);
+                            }),
+                          };
+                        })
+                      }
+                      disabled={!canEdit}
+                      title={`Condition ${conditionIndex + 1} - bloc`}
+                    >
+                      <option value="">Aucun bloc choix</option>
+                      {choiceBlocks.map((choiceBlock) => (
+                        <option key={choiceBlock.id} value={choiceBlock.id}>
+                          {choiceBlock.name || "Choix"} ({choiceBlock.id.slice(-4)})
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={condition.choiceOptionId ?? ""}
+                      onChange={(event) =>
+                        onUpdateSelectedBlock((candidate) => {
+                          if (candidate.type !== "switch") return candidate;
+                          return {
+                            ...candidate,
+                            cases: candidate.cases.map((candidateCase) => {
+                              if (candidateCase.id !== item.id) return candidateCase;
+                              const nextConditions = candidateCase.choiceConditions.map((candidateCondition) =>
+                                candidateCondition.id === condition.id
+                                  ? { ...candidateCondition, choiceOptionId: event.target.value || null }
+                                  : candidateCondition,
+                              );
+                              return withLegacyChoiceReference(candidateCase, nextConditions);
+                            }),
+                          };
+                        })
+                      }
+                      disabled={!canEdit}
+                      title={`Condition ${conditionIndex + 1} - option`}
+                    >
+                      <option value="">Aucune option</option>
+                      {sourceChoices.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label} - {option.text || "Sans texte"}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="button-danger"
+                      onClick={() =>
+                        onUpdateSelectedBlock((candidate) => {
+                          if (candidate.type !== "switch") return candidate;
+                          return {
+                            ...candidate,
+                            cases: candidate.cases.map((candidateCase) => {
+                              if (candidateCase.id !== item.id) return candidateCase;
+                              const nextConditions = candidateCase.choiceConditions.filter(
+                                (candidateCondition) => candidateCondition.id !== condition.id,
+                              );
+                              return withLegacyChoiceReference(candidateCase, nextConditions);
+                            }),
+                          };
+                        })
+                      }
+                      disabled={!canEdit}
+                      title="Supprimer cette condition"
+                    >
+                      x
+                    </button>
+                  </div>
+                );
+              })}
+              {choiceBlocks.length === 0 && (
+                <small className="empty-placeholder">
+                  Aucun bloc choix dans l histoire. Ajoute un bloc choix pour utiliser ce mode.
+                </small>
+              )}
+            </>
+          ) : (
+            <label>
+              Valeur attendue
+              <input
+                type="number"
+                value={item.expectedValue}
+                onChange={(event) =>
+                  onUpdateSelectedBlock((candidate) => {
+                    if (candidate.type !== "switch") return candidate;
+                    return {
+                      ...candidate,
+                      cases: candidate.cases.map((candidateCase) =>
+                        candidateCase.id === item.id
+                          ? { ...candidateCase, expectedValue: normalizeDelta(event.target.value) }
+                          : candidateCase,
+                      ),
+                    };
+                  })
+                }
+                disabled={!canEdit}
+              />
+            </label>
+          )}
+          <label>
+            Cible bloc
+            <select
+              value={item.targetBlockId ?? ""}
+              onChange={(event) =>
+                onSetConnection(block.id, `switch-case-${item.id}`, event.target.value || null)
+              }
+              disabled={!canEdit}
+            >
+              <option value="">Aucune cible</option>
+              {linkableBlocks.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name} ({BLOCK_LABELS[candidate.type]})
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ))}
+
+      <label>
+        Sortie Sinon
+        <select
+          value={block.nextBlockId ?? ""}
+          onChange={(event) =>
+            onSetConnection(block.id, SWITCH_DEFAULT_HANDLE, event.target.value || null)
+          }
+          disabled={!canEdit}
+        >
+          <option value="">Fin histoire</option>
+          {linkableBlocks.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.name} ({BLOCK_LABELS[candidate.type]})
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
@@ -2676,6 +3552,10 @@ interface HeroProfileEditorSectionProps {
 }
 
 function HeroProfileEditorSection({ block, project }: HeroProfileEditorSectionProps) {
+  const heroChoiceMemoryVariables = project.variables.filter((variable) =>
+    variable.name.trim().toLowerCase().startsWith("choix_"),
+  );
+
   return (
     <div className="subsection">
       <div className="title-with-help">
@@ -2691,6 +3571,22 @@ function HeroProfileEditorSection({ block, project }: HeroProfileEditorSectionPr
       <div className="choice-card">
         <strong>{project.hero.name || block.name}</strong>
         <p>{project.hero.lore || "Lore heros vide."}</p>
+      </div>
+      <div className="effect-list">
+        <div className="section-title-row">
+          <span>Memoire des choix</span>
+        </div>
+        {heroChoiceMemoryVariables.length === 0 && (
+          <small className="empty-placeholder">
+            Aucune variable memoire. Cree des variables nommees "choix_*" dans la fiche heros.
+          </small>
+        )}
+        {heroChoiceMemoryVariables.map((variable) => (
+          <div key={variable.id} className="effect-row">
+            <span>{variable.name}</span>
+            <small>Initial: {variable.initialValue}</small>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2846,17 +3742,40 @@ function ChapterStartEditorSection({
   canEdit,
   blocks,
   project,
+  chapterEndOptionsByChapterId,
   onSetSelectedDynamicField,
   onSetConnection,
+  onSetChapterStartPreviousLink,
 }: {
   block: ChapterStartBlock;
   canEdit: boolean;
   blocks: StoryBlock[];
   project: ProjectMeta;
+  chapterEndOptionsByChapterId: Record<string, ChapterEndBlock[]>;
   onSetSelectedDynamicField: (key: string, value: unknown) => void;
   onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
+  onSetChapterStartPreviousLink: (
+    chapterStartBlockId: string,
+    previousChapterId: string | null,
+    previousChapterEndBlockId: string | null,
+  ) => void;
 }) {
   const chapter = project.chapters.find((ch) => ch.id === block.chapterId);
+  const previousChapters = project.chapters.filter(
+    (ch) => ch.validated && ch.id !== block.chapterId,
+  );
+  const selectedPreviousChapterId = previousChapters.some((ch) => ch.id === block.linkedFromChapterId)
+    ? block.linkedFromChapterId
+    : null;
+  const previousChapterEndBlocks = selectedPreviousChapterId
+    ? chapterEndOptionsByChapterId[selectedPreviousChapterId] ?? []
+    : [];
+  const selectedPreviousEndBlockId = previousChapterEndBlocks.some(
+    (candidate) => candidate.id === block.linkedFromChapterEndBlockId,
+  )
+    ? block.linkedFromChapterEndBlockId
+    : null;
+
   return (
     <>
       <label>
@@ -2868,7 +3787,61 @@ function ChapterStartEditorSection({
         />
       </label>
       {chapter && (
-        <p className="form-hint">Chapitre: {chapter.name}</p>
+        <p className="form-hint">
+          Chapitre: {chapter.name}
+          {chapter.validated ? " (valide)" : ""}
+        </p>
+      )}
+      <label>
+        Relie a un chapitre precedent
+        <select
+          value={selectedPreviousChapterId ?? ""}
+          onChange={(event) => {
+            const nextChapterId = event.target.value || null;
+            if (!nextChapterId) {
+              onSetChapterStartPreviousLink(block.id, null, null);
+              return;
+            }
+            const firstEnd = chapterEndOptionsByChapterId[nextChapterId]?.[0];
+            onSetChapterStartPreviousLink(block.id, nextChapterId, firstEnd?.id ?? null);
+          }}
+          disabled={!canEdit}
+        >
+          <option value="">Aucun</option>
+          {previousChapters.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {selectedPreviousChapterId && (
+        <label>
+          Sortie du chapitre precedent
+          <select
+            value={selectedPreviousEndBlockId ?? ""}
+            onChange={(event) =>
+              onSetChapterStartPreviousLink(
+                block.id,
+                selectedPreviousChapterId,
+                event.target.value || null,
+              )
+            }
+            disabled={!canEdit}
+          >
+            <option value="">Aucune sortie</option>
+            {previousChapterEndBlocks.map((candidate, index) => (
+              <option key={candidate.id} value={candidate.id}>
+                {(candidate.name || `Fin ${index + 1}`).trim()}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {selectedPreviousChapterId && previousChapterEndBlocks.length === 0 && (
+        <p className="form-hint">
+          Ce chapitre precedent n&apos;a pas de bloc Fin de chapitre disponible.
+        </p>
       )}
       <NextBlockSelect
         selectedBlockId={block.id}
@@ -2889,21 +3862,46 @@ function ChapterEndEditorSection({
   block,
   canEdit,
   blocks,
+  project,
   onSetConnection,
+  onSetChapterValidationFromEnd,
 }: {
   block: ChapterEndBlock;
   canEdit: boolean;
   blocks: StoryBlock[];
+  project: ProjectMeta;
   onSetConnection: (sourceId: string, sourceHandle: string, targetId: string | null) => void;
+  onSetChapterValidationFromEnd: (chapterEndBlockId: string, validated: boolean) => void;
 }) {
+  const chapter = project.chapters.find((candidate) => candidate.id === block.chapterId);
+
   return (
-    <NextBlockSelect
-      selectedBlockId={block.id}
-      nextBlockId={block.nextBlockId}
-      blocks={blocks}
-      canEdit={canEdit}
-      onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
-    />
+    <>
+      {chapter ? (
+        <p className="form-hint">
+          Chapitre: {chapter.name}
+          {chapter.validated ? " (valide)" : ""}
+        </p>
+      ) : (
+        <p className="form-hint">
+          Ce bloc fin n&apos;est rattache a aucun chapitre.
+        </p>
+      )}
+      <button
+        className="button-secondary"
+        onClick={() => onSetChapterValidationFromEnd(block.id, !(chapter?.validated ?? false))}
+        disabled={!canEdit || !chapter}
+      >
+        {chapter?.validated ? "Retirer validation chapitre" : "Valider ce chapitre"}
+      </button>
+      <NextBlockSelect
+        selectedBlockId={block.id}
+        nextBlockId={block.nextBlockId}
+        blocks={blocks}
+        canEdit={canEdit}
+        onChange={(targetId) => onSetConnection(block.id, "next", targetId)}
+      />
+    </>
   );
 }
 
@@ -2925,10 +3923,13 @@ function ChapterAssignmentSelect({
   // chapter_start blocks auto-manage their chapterId ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â don't allow manual reassignment
   if (block.type === "chapter_start") return null;
   if (project.chapters.length === 0) return null;
+  const chapterLabel = block.type === "chapter_end"
+    ? "Ce block cloture quel chapitre?"
+    : "Chapitre";
 
   return (
     <label>
-      Chapitre
+      {chapterLabel}
       <select
         value={block.chapterId ?? ""}
         onChange={(event) => onSetSelectedDynamicField("chapterId", event.target.value || null)}
@@ -2950,6 +3951,7 @@ export function AuthorStudioBlockEditorPanel({
   canEdit,
   project,
   blocks,
+  chapterEndOptionsByChapterId,
   visibleIssues,
   onDeleteSelectedBlock,
   onDuplicateSelectedBlock,
@@ -3008,6 +4010,8 @@ export function AuthorStudioBlockEditorPanel({
   onRegisterAsset,
   onEnsureAssetPreviewSrc,
   onStatusMessage,
+  onSetChapterValidationFromEnd,
+  onSetChapterStartPreviousLink,
 }: AuthorStudioBlockEditorPanelProps) {
   return (
     <aside className="panel panel-right">
@@ -3164,6 +4168,8 @@ export function AuthorStudioBlockEditorPanel({
                 onSetConnection={onSetConnection}
                 onAssetInput={onAssetInput}
                 renderAssetAttachment={renderAssetAttachment}
+                onRegisterAsset={onRegisterAsset}
+                onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
                 onStatusMessage={onStatusMessage}
               />
             )}
@@ -3204,6 +4210,7 @@ export function AuthorStudioBlockEditorPanel({
                 blocks={blocks}
                 project={project}
                 onSetSelectedDynamicField={onSetSelectedDynamicField}
+                onUpdateSelectedBlock={onUpdateSelectedBlock}
                 onAssetInput={onAssetInput}
                 renderAssetAttachment={renderAssetAttachment}
                 renderAssetAttachmentWithRemove={renderAssetAttachmentWithRemove}
@@ -3216,7 +4223,21 @@ export function AuthorStudioBlockEditorPanel({
                 onAddChoiceEffect={onAddChoiceEffect}
                 onUpdateChoiceEffect={onUpdateChoiceEffect}
                 onRemoveChoiceEffect={onRemoveChoiceEffect}
+                onRegisterAsset={onRegisterAsset}
+                onEnsureAssetPreviewSrc={onEnsureAssetPreviewSrc}
+                onStatusMessage={onStatusMessage}
                 assetPreviewSrcById={assetPreviewSrcById}
+              />
+            )}
+
+            {selectedBlock.type === "switch" && (
+              <SwitchEditorSection
+                block={selectedBlock}
+                canEdit={canEdit}
+                blocks={blocks}
+                project={project}
+                onUpdateSelectedBlock={onUpdateSelectedBlock}
+                onSetConnection={onSetConnection}
               />
             )}
 
@@ -3281,8 +4302,10 @@ export function AuthorStudioBlockEditorPanel({
                 canEdit={canEdit}
                 blocks={blocks}
                 project={project}
+                chapterEndOptionsByChapterId={chapterEndOptionsByChapterId}
                 onSetSelectedDynamicField={onSetSelectedDynamicField}
                 onSetConnection={onSetConnection}
+                onSetChapterStartPreviousLink={onSetChapterStartPreviousLink}
               />
             )}
 
@@ -3291,7 +4314,9 @@ export function AuthorStudioBlockEditorPanel({
                 block={selectedBlock}
                 canEdit={canEdit}
                 blocks={blocks}
+                project={project}
                 onSetConnection={onSetConnection}
+                onSetChapterValidationFromEnd={onSetChapterValidationFromEnd}
               />
             )}
           </div>

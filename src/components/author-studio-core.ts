@@ -23,6 +23,7 @@ import {
   createBlock,
   createGameplayHotspotClickAction,
   createId,
+  defaultChoiceOptionLayout,
   normalizeStoryBlock,
 } from "@/lib/story";
 
@@ -60,6 +61,16 @@ export function lineIdFromHandle(handle: string | null | undefined): string | nu
   return match ? match[1] : null;
 }
 
+export function lineContinueIdFromHandle(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const match = /^line-continue-(.+)$/.exec(handle);
+  return match ? match[1] : null;
+}
+
+export function isDialogueAutoNextHandle(handle: string | null | undefined): boolean {
+  return Boolean(handle && /^line-next-(.+)$/.test(handle));
+}
+
 export function gameplayLockIdFromHandle(handle: string | null | undefined): string | null {
   if (!handle) return null;
   const match = /^lock-(.+)$/.exec(handle);
@@ -68,11 +79,21 @@ export function gameplayLockIdFromHandle(handle: string | null | undefined): str
 
 export const GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE = "button-seq-success";
 export const GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE = "button-seq-failure";
+export const SWITCH_DEFAULT_HANDLE = "switch-default";
+
+export function switchCaseIdFromHandle(handle: string | null | undefined): string | null {
+  if (!handle) return null;
+  const match = /^switch-case-(.+)$/.exec(handle);
+  return match ? match[1] : null;
+}
 
 export function buildEdge(source: string, target: string, sourceHandle: string, label?: string, targetHandle?: string): EditorEdge {
   const lockId = gameplayLockIdFromHandle(sourceHandle);
+  const switchCaseId = switchCaseIdFromHandle(sourceHandle);
+  const lineContinueId = lineContinueIdFromHandle(sourceHandle);
   const isButtonSequenceSuccess = sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE;
   const isButtonSequenceFailure = sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE;
+  const isSwitchDefault = sourceHandle === SWITCH_DEFAULT_HANDLE;
   const derivedLabel =
     label ??
     (sourceHandle === "npc-link"
@@ -80,6 +101,12 @@ export function buildEdge(source: string, target: string, sourceHandle: string, 
       : choiceLabelFromHandle(sourceHandle)
         ?? (lockId
           ? "Serrure"
+          : switchCaseId
+            ? "Cas"
+            : lineContinueId
+              ? "Continuer"
+            : isSwitchDefault
+              ? "Sinon"
           : isButtonSequenceSuccess
             ? "Code OK"
             : isButtonSequenceFailure
@@ -131,7 +158,8 @@ export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
     const block = node.data.block;
 
     if (block.type === "dialogue") {
-      for (const line of block.lines) {
+      for (let lineIndex = 0; lineIndex < block.lines.length; lineIndex += 1) {
+        const line = block.lines[lineIndex];
         for (const resp of line.responses) {
           if (resp.targetBlockId) {
             const tgtHandle = resp.targetLineId ? `line-${resp.targetLineId}` : undefined;
@@ -139,6 +167,32 @@ export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
           } else if (resp.targetLineId) {
             // Internal self-edge within same block
             edges.push(buildEdge(block.id, block.id, `resp-${resp.id}`, resp.label, `line-${resp.targetLineId}`));
+          }
+        }
+
+        if (line.responses.length === 0) {
+          if (line.continueTargetBlockId) {
+            edges.push(
+              buildEdge(
+                block.id,
+                line.continueTargetBlockId,
+                `line-continue-${line.id}`,
+                "Continuer",
+              ),
+            );
+          } else {
+            const nextLine = block.lines[lineIndex + 1];
+            if (nextLine) {
+              const autoNextEdge = buildEdge(
+                block.id,
+                block.id,
+                `line-next-${line.id}`,
+                "Suite",
+                `line-${nextLine.id}`,
+              );
+              autoNextEdge.id = `dialogue-auto-next-${block.id}-${line.id}-${nextLine.id}`;
+              edges.push(autoNextEdge);
+            }
           }
         }
       }
@@ -150,6 +204,24 @@ export function rebuildEdgesFromNodes(nodes: EditorNode[]): EditorEdge[] {
         if (option.targetBlockId) {
           edges.push(buildEdge(block.id, option.targetBlockId, `choice-${option.label}`));
         }
+      }
+    } else if (block.type === "switch") {
+      for (const item of block.cases) {
+        if (!item.targetBlockId) continue;
+        const caseLabel = item.conditionType === "choice"
+          ? `Choix x${Math.max(1, item.choiceConditions.length)}`
+          : `= ${item.expectedValue}`;
+        edges.push(
+          buildEdge(
+            block.id,
+            item.targetBlockId,
+            `switch-case-${item.id}`,
+            caseLabel,
+          ),
+        );
+      }
+      if (block.nextBlockId) {
+        edges.push(buildEdge(block.id, block.nextBlockId, SWITCH_DEFAULT_HANDLE, "Sinon"));
       }
     } else if (block.type === "gameplay") {
       const locks = block.objects.filter((obj) => obj.objectType === "lock");
@@ -236,9 +308,16 @@ export function collectAssetIds(block: StoryBlock) {
     return block.backgroundAssetId ? [block.backgroundAssetId] : [];
   }
   if (block.type === "cinematic") {
-    return [block.backgroundAssetId, block.characterAssetId, block.videoAssetId, block.voiceAssetId].filter(
-      (value): value is string => Boolean(value),
-    );
+    const layerAssetIds = (block.characterLayers ?? [])
+      .map((layer) => layer.assetId)
+      .filter((value): value is string => Boolean(value));
+    return [
+      block.backgroundAssetId,
+      block.characterAssetId,
+      ...layerAssetIds,
+      block.videoAssetId,
+      block.voiceAssetId,
+    ].filter((value): value is string => Boolean(value));
   }
   if (block.type === "dialogue") {
     const lineVoiceIds = (block.lines ?? [])
@@ -255,7 +334,10 @@ export function collectAssetIds(block: StoryBlock) {
     const optionImageIds = block.choices
       .map((option) => option.imageAssetId)
       .filter((value): value is string => Boolean(value));
-    return [block.backgroundAssetId, block.voiceAssetId, ...optionImageIds].filter(
+    const characterLayerAssetIds = (block.characterLayers ?? [])
+      .map((layer) => layer.assetId)
+      .filter((value): value is string => Boolean(value));
+    return [block.backgroundAssetId, block.voiceAssetId, ...characterLayerAssetIds, ...optionImageIds].filter(
       (value): value is string => Boolean(value),
     );
   }
@@ -266,6 +348,9 @@ export function collectAssetIds(block: StoryBlock) {
     return block.imageAssetIds.filter((value): value is string => Boolean(value));
   }
   if (block.type === "chapter_start" || block.type === "chapter_end") {
+    return [];
+  }
+  if (block.type === "switch") {
     return [];
   }
   const objectAssetIds = block.objects
@@ -482,6 +567,17 @@ export function normalizeDelta(value: string) {
 }
 
 export function removeNodeReferences(block: StoryBlock, removedBlockId: string): StoryBlock {
+  if (block.type === "chapter_start") {
+    return {
+      ...block,
+      linkedFromChapterEndBlockId:
+        block.linkedFromChapterEndBlockId === removedBlockId
+          ? null
+          : block.linkedFromChapterEndBlockId,
+      nextBlockId: block.nextBlockId === removedBlockId ? null : block.nextBlockId,
+    };
+  }
+
   if (block.type === "dialogue") {
     return {
       ...block,
@@ -490,6 +586,10 @@ export function removeNodeReferences(block: StoryBlock, removedBlockId: string):
       npcImageAssetId: block.npcProfileBlockId === removedBlockId ? null : block.npcImageAssetId,
       lines: block.lines.map((line) => ({
         ...line,
+        continueTargetBlockId:
+          line.continueTargetBlockId === removedBlockId
+            ? null
+            : line.continueTargetBlockId,
         responses: line.responses.map((resp) =>
           resp.targetBlockId === removedBlockId
             ? { ...resp, targetBlockId: null }
@@ -507,6 +607,29 @@ export function removeNodeReferences(block: StoryBlock, removedBlockId: string):
           ? { ...option, targetBlockId: null }
           : option,
       ),
+    };
+  }
+
+  if (block.type === "switch") {
+    return {
+      ...block,
+      nextBlockId: block.nextBlockId === removedBlockId ? null : block.nextBlockId,
+      cases: block.cases.map((item) => {
+        const nextChoiceConditions = item.choiceConditions.filter(
+          (condition) => condition.choiceBlockId !== removedBlockId,
+        );
+        return {
+          ...item,
+          targetBlockId: item.targetBlockId === removedBlockId ? null : item.targetBlockId,
+          choiceConditions: nextChoiceConditions,
+          choiceBlockId:
+            nextChoiceConditions[0]?.choiceBlockId
+            ?? (item.choiceBlockId === removedBlockId ? null : item.choiceBlockId),
+          choiceOptionId:
+            nextChoiceConditions[0]?.choiceOptionId
+            ?? (item.choiceBlockId === removedBlockId ? null : item.choiceOptionId),
+        };
+      }),
     };
   }
 
@@ -560,8 +683,23 @@ export function removeVariableReferences(block: StoryBlock, removedVariableId: s
       entryEffects: nextEntryEffects,
       choices: block.choices.map((option) => ({
         ...option,
+        heroMemoryVariableId:
+          option.heroMemoryVariableId === removedVariableId
+            ? null
+            : option.heroMemoryVariableId,
         effects: option.effects.filter((effect) => effect.variableId !== removedVariableId),
       })),
+    };
+  }
+
+  if (block.type === "switch") {
+    return {
+      ...block,
+      entryEffects: nextEntryEffects,
+      variableId:
+        block.variableId === removedVariableId
+          ? null
+          : block.variableId,
     };
   }
 
@@ -640,8 +778,14 @@ export function downloadBlob(blob: Blob, fileName: string) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = fileName;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 0);
 }
 
 export function serializeBlock(
@@ -661,6 +805,8 @@ export function serializeBlock(
       chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
       chapterTitle: block.chapterTitle,
+      linkedFromChapterId: block.linkedFromChapterId,
+      linkedFromChapterEndBlockId: block.linkedFromChapterEndBlockId,
       nextBlockId: block.nextBlockId,
     };
   }
@@ -696,6 +842,10 @@ export function serializeBlock(
   }
 
   if (block.type === "cinematic") {
+    const legacyCharacterAssetId =
+      block.characterAssetId
+      ?? (block.characterLayers ?? []).find((layer) => layer.assetId)?.assetId
+      ?? null;
     return {
       id: block.id,
       type: block.type,
@@ -707,7 +857,15 @@ export function serializeBlock(
       heading: block.heading,
       body: block.body,
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
-      characterPath: assetPath(block.characterAssetId, assetRefs),
+      characterPath: assetPath(legacyCharacterAssetId, assetRefs),
+      characterLayers: (block.characterLayers ?? []).map((layer) => ({
+        id: layer.id,
+        label: layer.label,
+        zIndex: layer.zIndex,
+        layout: layer.layout,
+        assetId: layer.assetId,
+        imagePath: assetPath(layer.assetId, assetRefs),
+      })),
       sceneLayout: block.sceneLayout,
       videoPath: assetPath(block.videoAssetId, assetRefs),
       voicePath: assetPath(block.voiceAssetId, assetRefs),
@@ -747,6 +905,7 @@ export function serializeBlock(
         voicePath: assetPath(line.voiceAssetId, assetRefs),
         conditions: line.conditions,
         fallbackLineId: line.fallbackLineId,
+        continueTargetBlockId: line.continueTargetBlockId,
         responses: line.responses.map((resp) => ({
           id: resp.id,
           label: resp.label,
@@ -769,8 +928,18 @@ export function serializeBlock(
       notes: block.notes,
       chapterId,
       entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
+      displayMode: block.displayMode,
       prompt: block.prompt,
       backgroundPath: assetPath(block.backgroundAssetId, assetRefs),
+      sceneLayout: block.sceneLayout,
+      characterLayers: (block.characterLayers ?? []).map((layer) => ({
+        id: layer.id,
+        label: layer.label,
+        zIndex: layer.zIndex,
+        layout: layer.layout,
+        assetId: layer.assetId,
+        imagePath: assetPath(layer.assetId, assetRefs),
+      })),
       voicePath: assetPath(block.voiceAssetId, assetRefs),
       choices: block.choices.map((option) => ({
         id: option.id,
@@ -778,9 +947,46 @@ export function serializeBlock(
         text: option.text,
         description: option.description,
         imagePath: assetPath(option.imageAssetId, assetRefs),
+        layout: option.layout,
+        zIndex: option.zIndex,
         targetBlockId: option.targetBlockId,
         effects: serializeEffects(option.effects, variableNameById),
+        heroMemoryVariableId: option.heroMemoryVariableId,
+        heroMemoryVariableName: option.heroMemoryVariableId
+          ? variableNameById.get(option.heroMemoryVariableId) ?? "unknown"
+          : null,
+        heroMemoryValue: option.heroMemoryValue,
       })),
+    };
+  }
+
+  if (block.type === "switch") {
+    return {
+      id: block.id,
+      type: block.type,
+      name: block.name,
+      position: block.position,
+      notes: block.notes,
+      chapterId,
+      entryEffects: serializeEffects(block.entryEffects ?? [], variableNameById),
+      variableId: block.variableId,
+      variableName: block.variableId
+        ? variableNameById.get(block.variableId) ?? "unknown"
+        : null,
+      cases: block.cases.map((item) => ({
+        id: item.id,
+        conditionType: item.conditionType,
+        expectedValue: item.expectedValue,
+        choiceConditions: item.choiceConditions.map((condition) => ({
+          id: condition.id,
+          choiceBlockId: condition.choiceBlockId,
+          choiceOptionId: condition.choiceOptionId,
+        })),
+        choiceBlockId: item.choiceBlockId,
+        choiceOptionId: item.choiceOptionId,
+        targetBlockId: item.targetBlockId,
+      })),
+      nextBlockId: block.nextBlockId,
     };
   }
 
@@ -895,6 +1101,12 @@ export function deserializeBlockFromExport(
       ...base,
       type: "chapter_start",
       chapterTitle: (raw.chapterTitle as string) ?? "Chapitre",
+      linkedFromChapterId:
+        typeof raw.linkedFromChapterId === "string" ? raw.linkedFromChapterId : null,
+      linkedFromChapterEndBlockId:
+        typeof raw.linkedFromChapterEndBlockId === "string"
+          ? raw.linkedFromChapterEndBlockId
+          : null,
       nextBlockId: (raw.nextBlockId as string) ?? null,
     });
   }
@@ -926,6 +1138,17 @@ export function deserializeBlockFromExport(
   }
 
   if (type === "cinematic") {
+    const rawCharLayers = Array.isArray(raw.characterLayers) ? raw.characterLayers : [];
+    const characterLayers: CharacterLayer[] = rawCharLayers.map(
+      (layer: Record<string, unknown>) => ({
+        id: (layer.id as string) ?? createId("clayer"),
+        assetId: resolveAssetId(layer.imagePath, pathToAssetId) ?? (typeof layer.assetId === "string" ? layer.assetId : null),
+        label: (layer.label as string) ?? "Perso",
+        zIndex: typeof layer.zIndex === "number" ? layer.zIndex : 1,
+        layout: (layer.layout as CharacterLayer["layout"] | undefined) ?? { ...DEFAULT_CHARACTER_LAYOUT },
+      }),
+    );
+
     return normalizeStoryBlock({
       ...base,
       type: "cinematic",
@@ -933,6 +1156,7 @@ export function deserializeBlockFromExport(
       body: (raw.body as string) ?? "",
       backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
       characterAssetId: resolveAssetId(raw.characterPath, pathToAssetId),
+      characterLayers,
       sceneLayout: raw.sceneLayout
         ? (raw.sceneLayout as typeof DEFAULT_SCENE_LAYOUT)
         : { ...DEFAULT_SCENE_LAYOUT },
@@ -953,6 +1177,8 @@ export function deserializeBlockFromExport(
       voiceAssetId: resolveAssetId(line.voicePath, pathToAssetId),
       conditions: Array.isArray(line.conditions) ? line.conditions as DialogueLine["conditions"] : [],
       fallbackLineId: typeof line.fallbackLineId === "string" ? line.fallbackLineId : null,
+      continueTargetBlockId:
+        typeof line.continueTargetBlockId === "string" ? line.continueTargetBlockId : null,
       responses: Array.isArray(line.responses)
         ? (line.responses as Record<string, unknown>[]).map(
             (resp): DialogueResponse => ({
@@ -997,21 +1223,106 @@ export function deserializeBlockFromExport(
 
   if (type === "choice") {
     const rawChoices = Array.isArray(raw.choices) ? raw.choices : [];
+    const rawCharacterLayers = Array.isArray(raw.characterLayers) ? raw.characterLayers : [];
+    const hasAnyChoiceImage = rawChoices.some(
+      (option) => typeof option.imagePath === "string" && option.imagePath,
+    );
+    const rawDisplayMode =
+      raw.displayMode === "text" || raw.displayMode === "visual"
+        ? raw.displayMode
+        : hasAnyChoiceImage
+          ? "visual"
+          : "text";
     return normalizeStoryBlock({
       ...base,
       type: "choice",
+      displayMode: rawDisplayMode,
       prompt: (raw.prompt as string) ?? "",
       backgroundAssetId: resolveAssetId(raw.backgroundPath, pathToAssetId),
-      voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
-      choices: rawChoices.map((option: Record<string, unknown>) => ({
-        id: (option.id as string) ?? createId("option"),
-        label: ((option.label as string) ?? "A") as ChoiceLabel,
-        text: (option.text as string) ?? "",
-        description: (option.description as string) ?? "",
-        imageAssetId: resolveAssetId(option.imagePath, pathToAssetId),
-        targetBlockId: (option.targetBlockId as string) ?? null,
-        effects: deserializeEffects(option.effects),
+      sceneLayout: raw.sceneLayout
+        ? (raw.sceneLayout as typeof DEFAULT_SCENE_LAYOUT)
+        : { ...DEFAULT_SCENE_LAYOUT },
+      characterLayers: rawCharacterLayers.map((layer: Record<string, unknown>) => ({
+        id: (layer.id as string) ?? createId("clayer"),
+        label: (layer.label as string) ?? "Perso",
+        zIndex: typeof layer.zIndex === "number" ? layer.zIndex : 1,
+        layout:
+          (layer.layout as CharacterLayer["layout"] | undefined) ?? { ...DEFAULT_CHARACTER_LAYOUT },
+        assetId:
+          resolveAssetId(layer.imagePath, pathToAssetId)
+          ?? (typeof layer.assetId === "string" ? layer.assetId : null),
       })),
+      voiceAssetId: resolveAssetId(raw.voicePath, pathToAssetId),
+      choices: rawChoices.map((option: Record<string, unknown>) => {
+        const label = ((option.label as string) ?? "A") as ChoiceLabel;
+        return {
+          id: (option.id as string) ?? createId("option"),
+          label,
+          text: (option.text as string) ?? "",
+          description: (option.description as string) ?? "",
+          imageAssetId: resolveAssetId(option.imagePath, pathToAssetId),
+          layout:
+            (option.layout as CharacterLayer["layout"] | undefined) ?? defaultChoiceOptionLayout(label),
+          zIndex:
+            typeof option.zIndex === "number" ? option.zIndex : 2,
+          targetBlockId: (option.targetBlockId as string) ?? null,
+          effects: deserializeEffects(option.effects),
+          heroMemoryVariableId:
+            typeof option.heroMemoryVariableId === "string" && option.heroMemoryVariableId
+              ? option.heroMemoryVariableId
+              : null,
+          heroMemoryValue:
+            typeof option.heroMemoryValue === "number"
+              ? option.heroMemoryValue
+              : 1,
+        };
+      }),
+    });
+  }
+
+  if (type === "switch") {
+    const rawCases = Array.isArray(raw.cases) ? raw.cases : [];
+    return normalizeStoryBlock({
+      ...base,
+      type: "switch",
+      variableId:
+        typeof raw.variableId === "string" && raw.variableId
+          ? raw.variableId
+          : null,
+      cases: rawCases.map((item: Record<string, unknown>) => ({
+        id: (item.id as string) ?? createId("switch_case"),
+        conditionType: item.conditionType === "choice" ? "choice" : "value",
+        expectedValue:
+          typeof item.expectedValue === "number"
+            ? item.expectedValue
+            : 0,
+        choiceConditions: Array.isArray(item.choiceConditions)
+          ? (item.choiceConditions as Record<string, unknown>[]).map((condition) => ({
+              id: (condition.id as string) ?? createId("switch_cond"),
+              choiceBlockId:
+                typeof condition.choiceBlockId === "string" && condition.choiceBlockId
+                  ? condition.choiceBlockId
+                  : null,
+              choiceOptionId:
+                typeof condition.choiceOptionId === "string" && condition.choiceOptionId
+                  ? condition.choiceOptionId
+                  : null,
+            }))
+          : [],
+        choiceBlockId:
+          typeof item.choiceBlockId === "string" && item.choiceBlockId
+            ? item.choiceBlockId
+            : null,
+        choiceOptionId:
+          typeof item.choiceOptionId === "string" && item.choiceOptionId
+            ? item.choiceOptionId
+            : null,
+        targetBlockId:
+          typeof item.targetBlockId === "string"
+            ? item.targetBlockId
+            : null,
+      })),
+      nextBlockId: (raw.nextBlockId as string) ?? null,
     });
   }
 

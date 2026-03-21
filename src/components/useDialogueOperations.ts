@@ -76,6 +76,12 @@ export function useDialogueOperations({
     setEdges((current) =>
       current.filter((edge) => {
         if (edge.source === block.id && removedRespHandles.has(edge.sourceHandle ?? "")) return false;
+        if (
+          edge.source === block.id &&
+          (edge.sourceHandle ?? "") === `line-continue-${lineId}`
+        ) {
+          return false;
+        }
         if (edge.target === block.id && edge.targetHandle === `line-${lineId}`) return false;
         return true;
       }),
@@ -118,6 +124,17 @@ export function useDialogueOperations({
     if (!block) return;
     const line = block.lines.find((l) => l.id === lineId);
     if (!line || line.responses.length >= 4) return;
+    if (line.responses.length === 0) {
+      setEdges((current) =>
+        current.filter(
+          (edge) =>
+            !(
+              edge.source === block.id &&
+              (edge.sourceHandle ?? "") === `line-continue-${lineId}`
+            ),
+        ),
+      );
+    }
     const label = CHOICE_LABELS[line.responses.length];
     const newResp = createDefaultResponse(label);
     updateSelectedBlock((b) => {
@@ -125,7 +142,13 @@ export function useDialogueOperations({
       return {
         ...b,
         lines: b.lines.map((l) =>
-          l.id === lineId ? { ...l, responses: [...l.responses, newResp] } : l,
+          l.id === lineId
+            ? {
+                ...l,
+                continueTargetBlockId: null,
+                responses: [...l.responses, newResp],
+              }
+            : l,
         ),
       };
     });
@@ -136,7 +159,7 @@ export function useDialogueOperations({
     const block = asDialogue();
     if (!block) return;
     const line = block.lines.find((l) => l.id === lineId);
-    if (!line || line.responses.length <= 1) return;
+    if (!line || line.responses.length === 0) return;
     const removed = line.responses.find((r) => r.id === responseId);
     if (!removed) return;
     if (removed.targetBlockId || removed.targetLineId) {

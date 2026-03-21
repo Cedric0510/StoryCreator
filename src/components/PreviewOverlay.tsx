@@ -357,10 +357,17 @@ export function PreviewOverlay({
           {/* ── CINEMATIC ── */}
           {previewBlock?.type === "cinematic" && (() => {
             const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
-            const charSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
+            const legacyCharSrc = assetPreviewSrcById[previewBlock.characterAssetId ?? ""];
             const videoSrc = assetPreviewSrcById[previewBlock.videoAssetId ?? ""];
             const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
             const sl = previewBlock.sceneLayout;
+            const charLayers = (previewBlock.characterLayers ?? [])
+              .map((layer) => ({
+                ...layer,
+                src: assetPreviewSrcById[layer.assetId ?? ""],
+              }))
+              .filter((layer) => layer.src)
+              .sort((a, b) => b.zIndex - a.zIndex);
             return (
               <div className="preview-vn-scene">
                 {/* Background — positioned via sceneLayout */}
@@ -379,10 +386,26 @@ export function PreviewOverlay({
                 )}
 
                 {/* Character — positioned via sceneLayout */}
-                {charSrc && (
+                {charLayers.map((layer) => (
+                  <img
+                    key={layer.id}
+                    className="preview-vn-char-layer"
+                    src={layer.src}
+                    alt={layer.label}
+                    style={{
+                      left: `${layer.layout.x}%`,
+                      top: `${layer.layout.y}%`,
+                      width: `${layer.layout.width}%`,
+                      height: `${layer.layout.height}%`,
+                      zIndex: 10 - layer.zIndex,
+                    }}
+                  />
+                ))}
+
+                {charLayers.length === 0 && legacyCharSrc && (
                   <img
                     className="preview-vn-char-layer"
-                    src={charSrc}
+                    src={legacyCharSrc}
                     alt="Personnage"
                     style={{
                       left: `${sl.character.x}%`,
@@ -405,7 +428,7 @@ export function PreviewOverlay({
                 {voiceSrc && (
                   <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
                 )}
-                <div className="preview-vn-textbox">
+                <div className="preview-vn-textbox preview-vn-cinematic-textbox">
                   <div className="preview-vn-textbox-inner">
                     {previewBlock.heading && (
                       <span className="preview-vn-speaker">{previewBlock.heading}</span>
@@ -513,7 +536,8 @@ export function PreviewOverlay({
                     </div>
                   </div>
                   <div className="preview-vn-responses">
-                    {currentLine.responses.map((resp) => (
+                    {currentLine.responses.length > 0 ? (
+                      currentLine.responses.map((resp) => (
                       <button
                         key={resp.id}
                         className="preview-vn-response-btn"
@@ -522,7 +546,12 @@ export function PreviewOverlay({
                         <strong>{resp.label}</strong>
                         <span>{resp.text || "…"}</span>
                       </button>
-                    ))}
+                      ))
+                    ) : (
+                      <button className="preview-vn-response-btn" onClick={onContinue}>
+                        <strong>Continuer</strong>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -533,33 +562,128 @@ export function PreviewOverlay({
           {previewBlock?.type === "choice" && (() => {
             const bgSrc = assetPreviewSrcById[previewBlock.backgroundAssetId ?? ""];
             const voiceSrc = assetPreviewSrcById[previewBlock.voiceAssetId ?? ""];
+            const sl = previewBlock.sceneLayout;
+            const positionedChoices = previewBlock.choices
+              .map((option) => ({
+                ...option,
+                imageSrc: assetPreviewSrcById[option.imageAssetId ?? ""],
+              }))
+              .sort((a, b) => b.zIndex - a.zIndex);
+            const hasChoiceImages = positionedChoices.some((option) => Boolean(option.imageSrc));
+            const isTextChoiceMode = previewBlock.displayMode === "text";
+            const showVisualChoiceScene = !isTextChoiceMode && hasChoiceImages;
+            const textModeCharacterLayers = isTextChoiceMode
+              ? (previewBlock.characterLayers ?? [])
+                  .map((layer, index) => ({
+                    id: layer.id,
+                    label: layer.label || `Perso ${index + 1}`,
+                    zIndex: layer.zIndex,
+                    layout: layer.layout,
+                    imageSrc: assetPreviewSrcById[layer.assetId ?? ""],
+                  }))
+                  .filter((layer) => Boolean(layer.imageSrc))
+              : [];
+
             return (
-              <div className="preview-vn-scene" style={bgSrc ? { backgroundImage: `url(${bgSrc})` } : undefined}>
+              <div className="preview-vn-scene">
+                {bgSrc && (
+                  <img
+                    className="preview-vn-bg-layer"
+                    src={bgSrc}
+                    alt=""
+                    style={{
+                      left: `${sl.background.x}%`,
+                      top: `${sl.background.y}%`,
+                      width: `${sl.background.width}%`,
+                      height: `${sl.background.height}%`,
+                    }}
+                  />
+                )}
                 {voiceSrc && (
                   <audio className="preview-vn-audio" src={voiceSrc} controls autoPlay />
                 )}
-                <div className="preview-vn-choice-area">
-                  <h3 className="preview-vn-choice-prompt">{previewBlock.prompt || "Choisissez…"}</h3>
-                  <div className="preview-vn-choice-grid">
-                    {previewBlock.choices.map((option) => {
-                      const imgSrc = assetPreviewSrcById[option.imageAssetId ?? ""];
-                      return (
+                {textModeCharacterLayers.map((option) => (
+                  <img
+                    key={`text-char-${option.id}`}
+                    className="preview-vn-char-layer"
+                    src={option.imageSrc}
+                    alt={option.label}
+                    style={{
+                      left: `${option.layout.x}%`,
+                      top: `${option.layout.y}%`,
+                      width: `${option.layout.width}%`,
+                      height: `${option.layout.height}%`,
+                      zIndex: 10 - option.zIndex,
+                    }}
+                  />
+                ))}
+
+                <div className="preview-vn-choice-scene-area">
+                  <h3 className="preview-vn-choice-prompt">{previewBlock.prompt || "Choisissez..."}</h3>
+
+                  {showVisualChoiceScene ? (
+                    <div className="preview-vn-choice-scene">
+                      {positionedChoices.map((option) => (
+                        <button
+                          key={option.id}
+                          className="preview-vn-choice-hotspot"
+                          onClick={() => onPickChoice(option.id)}
+                          style={{
+                            left: `${option.layout.x}%`,
+                            top: `${option.layout.y}%`,
+                            width: `${option.layout.width}%`,
+                            height: `${option.layout.height}%`,
+                            zIndex: 20 - option.zIndex,
+                          }}
+                          title={`${option.label}: ${option.text || "Choix"}`}
+                        >
+                          {option.imageSrc ? (
+                            <img
+                              className="preview-vn-choice-hotspot-img"
+                              src={option.imageSrc}
+                              alt={option.text || option.label}
+                            />
+                          ) : (
+                            <span className="preview-vn-choice-hotspot-fallback">
+                              {option.label}
+                            </span>
+                          )}
+                          <span className="preview-vn-choice-hotspot-caption">
+                            {option.text || option.label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="preview-vn-choice-grid">
+                      {previewBlock.choices.map((option) => (
                         <button
                           key={option.id}
                           className="preview-vn-choice-btn"
                           onClick={() => onPickChoice(option.id)}
                         >
-                          {imgSrc && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img className="preview-vn-choice-img" src={imgSrc} alt={option.label} />
-                          )}
                           <strong>{option.label}</strong>
-                          <span>{option.text || "…"}</span>
+                          <span>{option.text || "..."}</span>
                           {option.description && <small>{option.description}</small>}
                         </button>
-                      );
-                    })}
-                  </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {showVisualChoiceScene && (
+                    <div className="preview-vn-choice-fallback-list">
+                      {previewBlock.choices.map((option) => (
+                        <button
+                          key={`fallback-${option.id}`}
+                          className="preview-vn-choice-fallback-btn"
+                          onClick={() => onPickChoice(option.id)}
+                        >
+                          <strong>{option.label}</strong>
+                          <span>{option.text || "Choix"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );

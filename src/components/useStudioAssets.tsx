@@ -239,12 +239,14 @@ export function useStudioAssets({
 
   const exportZip = useCallback(async () => {
    try {
-    const issues = validateStoryBlocks(blocks, project.info.startBlockId);
+    const issues = validateStoryBlocks(blocks, project.info.startBlockId, project.items);
     setLastValidation(issues);
 
     const errors = issues.filter((issue) => issue.level === "error");
     if (errors.length > 0) {
-      setStatusMessage("Corrige les erreurs bloquantes avant export.");
+      setStatusMessage(
+        `Export bloque: ${errors.length} erreur(s). ${errors[0]?.message ?? "Corrige les erreurs bloquantes avant export."}`,
+      );
       return;
     }
 

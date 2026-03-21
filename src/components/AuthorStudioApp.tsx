@@ -51,13 +51,17 @@ import {
   choiceLabelFromHandle,
   GAMEPLAY_BUTTON_SEQUENCE_FAILURE_HANDLE,
   GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE,
+  SWITCH_DEFAULT_HANDLE,
   gameplayLockIdFromHandle,
+  isDialogueAutoNextHandle,
+  lineContinueIdFromHandle,
   lineIdFromHandle,
   rebuildEdgesFromNodes,
   removeItemReferences,
   removeNodeReferences,
   removeVariableReferences,
   responseIdFromHandle,
+  switchCaseIdFromHandle,
 } from "@/components/author-studio-core";
 import {
   PlatformRole,
@@ -66,6 +70,7 @@ import {
   BLOCK_LABELS,
   BlockType,
   Chapter,
+  ChapterEndBlock,
   ProjectMeta,
   StoryBlock,
   ValidationIssue,
@@ -116,12 +121,40 @@ function normalizeProjectHero(
   };
 }
 
+function normalizeProjectChapters(chapters: unknown): ProjectMeta["chapters"] {
+  if (!Array.isArray(chapters)) return [];
+
+  const normalized: ProjectMeta["chapters"] = [];
+  const seenIds = new Set<string>();
+  for (let index = 0; index < chapters.length; index += 1) {
+    const candidate = chapters[index] as Partial<ProjectMeta["chapters"][number]>;
+    if (!candidate || typeof candidate !== "object") continue;
+
+    const id = typeof candidate.id === "string" && candidate.id ? candidate.id : createId("chapter");
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    const cleanName =
+      typeof candidate.name === "string" && candidate.name.trim().length > 0
+        ? candidate.name.trim()
+        : `Chapitre ${index + 1}`;
+
+    normalized.push({
+      id,
+      name: cleanName,
+      collapsed: candidate.collapsed === true,
+      validated: candidate.validated === true,
+    });
+  }
+  return normalized;
+}
+
 function withCollapsedChapterFolders(
   nodes: EditorNode[],
   chapters: Chapter[],
 ): EditorNode[] {
   const baseNodes = nodes.filter((node) => node.type !== "chapterFolder");
-  const collapsedChapters = chapters.filter((chapter) => chapter.collapsed);
+  const collapsedChapters = chapters.filter((chapter) => chapter.collapsed && !chapter.validated);
   if (collapsedChapters.length === 0) return baseNodes;
 
   const chapterStartById = new Map<string, EditorNode>();
@@ -338,6 +371,7 @@ function mergeChaptersForZipImport(
       id: mappedChapterId,
       name: chapterName,
       collapsed: importedChapter?.collapsed ?? false,
+      validated: importedChapter?.validated ?? false,
     });
   }
 
@@ -454,6 +488,7 @@ function remapBlockForZipImport(block: StoryBlock, maps: ZipImportMergeMaps): St
       npcProfileBlockId: remapOptionalId(block.npcProfileBlockId, maps.blockIdMap),
       lines: block.lines.map((line) => ({
         ...line,
+        continueTargetBlockId: remapOptionalId(line.continueTargetBlockId, maps.blockIdMap),
         conditions: line.conditions.map((condition) => ({
           ...condition,
           npcProfileBlockId: remapRequiredId(condition.npcProfileBlockId, maps.blockIdMap),
@@ -478,8 +513,27 @@ function remapBlockForZipImport(block: StoryBlock, maps: ZipImportMergeMaps): St
       choices: block.choices.map((choice) => ({
         ...choice,
         targetBlockId: remapOptionalId(choice.targetBlockId, maps.blockIdMap),
+        heroMemoryVariableId: remapOptionalId(choice.heroMemoryVariableId, maps.variableIdMap),
         effects: remapVariableEffects(choice.effects, maps.variableIdMap),
       })),
+    });
+  }
+
+  if (block.type === "switch") {
+    return normalizeStoryBlock({
+      ...block,
+      ...remappedCore,
+      variableId: remapOptionalId(block.variableId, maps.variableIdMap),
+      cases: block.cases.map((item) => ({
+        ...item,
+        choiceConditions: item.choiceConditions.map((condition) => ({
+          ...condition,
+          choiceBlockId: remapOptionalId(condition.choiceBlockId, maps.blockIdMap),
+        })),
+        choiceBlockId: remapOptionalId(item.choiceBlockId, maps.blockIdMap),
+        targetBlockId: remapOptionalId(item.targetBlockId, maps.blockIdMap),
+      })),
+      nextBlockId: remapOptionalId(block.nextBlockId, maps.blockIdMap),
     });
   }
 
@@ -570,6 +624,8 @@ function remapBlockForZipImport(block: StoryBlock, maps: ZipImportMergeMaps): St
       ...block,
       ...remappedCore,
       chapterId: remapOptionalId(block.chapterId, maps.chapterIdMap),
+      linkedFromChapterId: remapOptionalId(block.linkedFromChapterId, maps.chapterIdMap),
+      linkedFromChapterEndBlockId: remapOptionalId(block.linkedFromChapterEndBlockId, maps.blockIdMap),
       nextBlockId: remapOptionalId(block.nextBlockId, maps.blockIdMap),
     });
   }
@@ -649,12 +705,22 @@ export function AuthorStudioApp() {
   const router = useRouter();
   const MAX_TOASTS = 8;
   const [seed] = useState<InitialStudio>(() => buildInitialStudio());
+  const initialProject = useMemo<ProjectMeta>(
+    () => ({
+      ...seed.project,
+      chapters: normalizeProjectChapters(seed.project.chapters),
+    }),
+    [seed.project],
+  );
   const [nodes, setNodes] = useState<EditorNode[]>(seed.nodes);
-  const [edges, setEdges] = useState<EditorEdge[]>(seed.edges);
-  const [project, setProject] = useState<ProjectMeta>(seed.project);
+  const [edges, setEdges] = useState<EditorEdge[]>(
+    seed.edges.filter((edge) => !isDialogueAutoNextHandle(edge.sourceHandle)),
+  );
+  const [project, setProject] = useState<ProjectMeta>(initialProject);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(
     project.info.startBlockId,
   );
+  const [openedValidatedChapterIds, setOpenedValidatedChapterIds] = useState<string[]>([]);
   const [lastValidation, setLastValidation] = useState<ValidationIssue[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [toasts, setToasts] = useState<Array<{ id: number; text: string; level: "info" | "warn" | "error"; exiting: boolean }>>([]);
@@ -716,7 +782,7 @@ export function AuthorStudioApp() {
   } = useCloudProjectState(setStatusMessage);
   const [newProjectWarningOpen, setNewProjectWarningOpen] = useState(false);
   const [lastSavedFingerprint, setLastSavedFingerprint] = useState(() =>
-    buildStudioChangeFingerprint(seed.project, seed.nodes, seed.edges, {}),
+    buildStudioChangeFingerprint(initialProject, seed.nodes, seed.edges, {}),
   );
   const rfInstanceRef = useRef<{ screenToFlowPosition: (pos: { x: number; y: number }) => { x: number; y: number } } | null>(null);
 
@@ -959,10 +1025,47 @@ export function AuthorStudioApp() {
     deleteBlockRef.current(blockId);
   }, []);
 
+  const openedValidatedChapterIdSet = useMemo(
+    () => new Set(openedValidatedChapterIds),
+    [openedValidatedChapterIds],
+  );
+
+  useEffect(() => {
+    const validChapterIdSet = new Set(
+      project.chapters.filter((chapter) => chapter.validated).map((chapter) => chapter.id),
+    );
+    setOpenedValidatedChapterIds((current) => {
+      const next = current.filter((chapterId) => validChapterIdSet.has(chapterId));
+      return next.length === current.length ? current : next;
+    });
+  }, [project.chapters]);
+
   const collapsedChapterIds = useMemo(
-    () => new Set(project.chapters.filter((ch) => ch.collapsed).map((ch) => ch.id)),
+    () =>
+      new Set(
+        project.chapters
+          .filter((ch) => ch.collapsed && !ch.validated)
+          .map((ch) => ch.id),
+      ),
     [project.chapters],
   );
+
+  const hiddenValidatedChapterIds = useMemo(
+    () =>
+      new Set(
+        project.chapters
+          .filter((chapter) => chapter.validated && !openedValidatedChapterIdSet.has(chapter.id))
+          .map((chapter) => chapter.id),
+      ),
+    [openedValidatedChapterIdSet, project.chapters],
+  );
+
+  const hiddenChapterIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const chapterId of collapsedChapterIds) ids.add(chapterId);
+    for (const chapterId of hiddenValidatedChapterIds) ids.add(chapterId);
+    return ids;
+  }, [collapsedChapterIds, hiddenValidatedChapterIds]);
 
   /** Map chapterId → chapter_start node (used to position folder nodes) */
   const chapterStartNodeMap = useMemo(() => {
@@ -1026,9 +1129,38 @@ export function AuthorStudioApp() {
     return memberIds ?? new Set<string>();
   }, [chapterBlockSets]);
 
+  const resolveChapterIdForBlock = useCallback((blockId: string): string | null => {
+    const directChapterId = blockById.get(blockId)?.chapterId;
+    if (directChapterId) return directChapterId;
+    for (const chapter of project.chapters) {
+      if (chapterBlockSets.get(chapter.id)?.has(blockId)) {
+        return chapter.id;
+      }
+    }
+    return null;
+  }, [blockById, chapterBlockSets, project.chapters]);
+
+  const chapterEndOptionsByChapterId = useMemo(() => {
+    const result: Record<string, ChapterEndBlock[]> = {};
+    for (const chapter of project.chapters) {
+      result[chapter.id] = [];
+    }
+    for (const block of blocks) {
+      if (block.type !== "chapter_end") continue;
+      const chapterId = resolveChapterIdForBlock(block.id);
+      if (!chapterId || !result[chapterId]) continue;
+      result[chapterId].push(block);
+    }
+    return result;
+  }, [blocks, project.chapters, resolveChapterIdForBlock]);
+
   const toggleChapterCollapsed = useCallback((chapterId: string) => {
     const chapter = project.chapters.find((ch) => ch.id === chapterId);
     if (!chapter) return;
+    if (chapter.validated) {
+      setStatusMessage("Un chapitre valide se gere depuis la liste des chapitres valides.");
+      return;
+    }
 
     const willCollapse = !chapter.collapsed;
 
@@ -1063,18 +1195,18 @@ export function AuthorStudioApp() {
     }
   }, [chapterStartNodeMap, computeChapterContext, project.chapters]);
 
-  /** Set of block IDs that belong to a currently collapsed chapter */
+  /** Set of block IDs hidden because their chapter is collapsed or validated/archived. */
   const hiddenBlockIds = useMemo(() => {
     const set = new Set<string>();
-    if (collapsedChapterIds.size === 0) return set;
+    if (hiddenChapterIds.size === 0) return set;
     for (const [chapterId, memberIds] of chapterBlockSets) {
-      if (!collapsedChapterIds.has(chapterId)) continue;
+      if (!hiddenChapterIds.has(chapterId)) continue;
       for (const id of memberIds) {
         set.add(id);
       }
     }
     return set;
-  }, [chapterBlockSets, collapsedChapterIds]);
+  }, [chapterBlockSets, hiddenChapterIds]);
 
   /** Validation skips blocks hidden inside collapsed chapters for perf */
   const liveIssues = useMemo(
@@ -1111,7 +1243,7 @@ export function AuthorStudioApp() {
           const cid = node.id.replace("folder-", "");
           const chapter = project.chapters.find((ch) => ch.id === cid);
           const memberIds = chapterBlockSets.get(cid);
-          if (!chapter?.collapsed) continue;
+          if (!chapter?.collapsed || chapter.validated) continue;
 
           visible.push({
             ...node,
@@ -1181,6 +1313,201 @@ export function AuthorStudioApp() {
     });
   }, []);
 
+  const setChapterValidationFromEnd = useCallback((chapterEndBlockId: string, validated: boolean) => {
+    if (!canEdit) return;
+    const endBlock = blockById.get(chapterEndBlockId);
+    if (!endBlock || endBlock.type !== "chapter_end") return;
+    const chapterId = resolveChapterIdForBlock(chapterEndBlockId);
+    if (!chapterId) {
+      setStatusMessage("Impossible de determiner le chapitre de cette fin de chapitre.");
+      return;
+    }
+    const chapter = project.chapters.find((candidate) => candidate.id === chapterId);
+    if (!chapter) {
+      setStatusMessage("Chapitre introuvable pour cette fin de chapitre.");
+      return;
+    }
+
+    setProject((current) => ({
+      ...current,
+      chapters: current.chapters.map((candidate) =>
+        candidate.id === chapterId
+          ? { ...candidate, validated, collapsed: validated ? false : candidate.collapsed }
+          : candidate,
+      ),
+      info: {
+        ...current.info,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+
+    if (validated) {
+      setOpenedValidatedChapterIds((current) => current.filter((id) => id !== chapterId));
+      setNodes((current) => current.filter((node) => node.id !== `folder-${chapterId}`));
+      const memberIds = computeChapterContext(chapterId);
+      setSelectedBlockId((current) => (current && memberIds.has(current) ? null : current));
+      setStatusMessage(`Chapitre "${chapter.name}" valide et archive dans la liste.`);
+      return;
+    }
+
+    setStatusMessage(`Chapitre "${chapter.name}" remis en edition sur le whiteboard.`);
+  }, [blockById, canEdit, computeChapterContext, project.chapters, resolveChapterIdForBlock, setStatusMessage]);
+
+  const toggleValidatedChapterVisibility = useCallback((chapterId: string) => {
+    const chapter = project.chapters.find((candidate) => candidate.id === chapterId);
+    if (!chapter || !chapter.validated) return;
+
+    const isOpen = openedValidatedChapterIdSet.has(chapterId);
+    if (isOpen) {
+      setOpenedValidatedChapterIds((current) => current.filter((id) => id !== chapterId));
+      const memberIds = computeChapterContext(chapterId);
+      setSelectedBlockId((current) => (current && memberIds.has(current) ? null : current));
+      setStatusMessage(`Chapitre "${chapter.name}" masque du whiteboard.`);
+      return;
+    }
+
+    setOpenedValidatedChapterIds((current) => [...current, chapterId]);
+    const chapterStartNode = chapterStartNodeMap.get(chapterId);
+    if (chapterStartNode) {
+      setSelectedBlockId(chapterStartNode.id);
+    }
+    setStatusMessage(`Chapitre "${chapter.name}" reouvert sur le whiteboard.`);
+  }, [
+    chapterStartNodeMap,
+    computeChapterContext,
+    openedValidatedChapterIdSet,
+    project.chapters,
+    setStatusMessage,
+  ]);
+
+  const setChapterStartPreviousLink = useCallback((
+    chapterStartBlockId: string,
+    previousChapterId: string | null,
+    previousChapterEndBlockId: string | null,
+  ) => {
+    if (!canEdit) return;
+    const startBlock = blockById.get(chapterStartBlockId);
+    if (!startBlock || startBlock.type !== "chapter_start") return;
+
+    const candidateChapterId = previousChapterId && previousChapterId !== startBlock.chapterId
+      ? previousChapterId
+      : null;
+    const normalizedChapterId =
+      candidateChapterId &&
+      project.chapters.some((chapter) => chapter.id === candidateChapterId && chapter.validated)
+        ? candidateChapterId
+        : null;
+    let normalizedEndBlockId = previousChapterEndBlockId ?? null;
+    if (normalizedChapterId && normalizedEndBlockId) {
+      const selectedEnd = blockById.get(normalizedEndBlockId);
+      const memberIds = chapterBlockSets.get(normalizedChapterId);
+      const belongsToChapter =
+        !!memberIds?.has(normalizedEndBlockId) ||
+        (selectedEnd?.type === "chapter_end" && selectedEnd.chapterId === normalizedChapterId);
+      if (
+        !selectedEnd ||
+        selectedEnd.type !== "chapter_end" ||
+        !belongsToChapter
+      ) {
+        normalizedEndBlockId = null;
+      }
+    } else {
+      normalizedEndBlockId = null;
+    }
+
+    setNodes((current) => {
+      const storyNodes = current.filter((node) => node.type !== "chapterFolder");
+      const folderNodes = current.filter((node) => node.type === "chapterFolder");
+
+      const updatedStoryNodes = storyNodes.map((node) => {
+        const block = node.data.block;
+        if (block.type === "chapter_start") {
+          if (node.id === chapterStartBlockId) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                block: {
+                  ...block,
+                  linkedFromChapterId: normalizedChapterId,
+                  linkedFromChapterEndBlockId: normalizedEndBlockId,
+                },
+              },
+            };
+          }
+          if (
+            normalizedEndBlockId &&
+            block.linkedFromChapterEndBlockId === normalizedEndBlockId
+          ) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                block: {
+                  ...block,
+                  linkedFromChapterId: null,
+                  linkedFromChapterEndBlockId: null,
+                },
+              },
+            };
+          }
+        }
+
+        if (block.type === "chapter_end") {
+          if (normalizedEndBlockId && node.id === normalizedEndBlockId) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                block: {
+                  ...block,
+                  nextBlockId: chapterStartBlockId,
+                },
+              },
+            };
+          }
+          if (block.nextBlockId === chapterStartBlockId) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                block: {
+                  ...block,
+                  nextBlockId: null,
+                },
+              },
+            };
+          }
+        }
+        return node;
+      });
+
+      const rebuiltEdges = rebuildEdgesFromNodes(updatedStoryNodes).filter(
+        (edge) => !isDialogueAutoNextHandle(edge.sourceHandle),
+      );
+      setEdges(rebuiltEdges);
+      return withCollapsedChapterFolders([...folderNodes, ...updatedStoryNodes], project.chapters);
+    });
+
+    setProject((current) => ({
+      ...current,
+      info: {
+        ...current.info,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+
+    if (!normalizedChapterId) {
+      setStatusMessage("Lien avec le chapitre precedent retire.");
+      return;
+    }
+    if (!normalizedEndBlockId) {
+      setStatusMessage("Chapitre precedent choisi. Selectionne une sortie de fin pour relier.");
+      return;
+    }
+    setStatusMessage("Debut de chapitre raccorde a la sortie de fin selectionnee.");
+  }, [blockById, canEdit, chapterBlockSets, project.chapters, setStatusMessage]);
+
   const {
     assetRefs,
     assetPreviewSrcById,
@@ -1239,10 +1566,18 @@ export function AuthorStudioApp() {
   }, []);
 
   // Toast system: push statusMessage changes as auto-fading toasts.
-  const prevStatusRef = useRef("");
+  const prevStatusRef = useRef<{ text: string; timestamp: number }>({
+    text: "",
+    timestamp: 0,
+  });
   useEffect(() => {
-    if (!statusMessage || statusMessage === prevStatusRef.current) return;
-    prevStatusRef.current = statusMessage;
+    if (!statusMessage) return;
+    const now = Date.now();
+    const isRecentDuplicate =
+      statusMessage === prevStatusRef.current.text &&
+      now - prevStatusRef.current.timestamp < 1200;
+    if (isRecentDuplicate) return;
+    prevStatusRef.current = { text: statusMessage, timestamp: now };
 
     const level: "info" | "warn" | "error" = /erreur|error|echoue|timeout|refusee|expiree/i.test(
       statusMessage,
@@ -1319,6 +1654,20 @@ export function AuthorStudioApp() {
       if (selectedBlock.type === "cinematic") {
         if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
         if (selectedBlock.characterAssetId) void ensureAssetPreviewSrc(selectedBlock.characterAssetId);
+        for (const layer of selectedBlock.characterLayers ?? []) {
+          if (layer.assetId) void ensureAssetPreviewSrc(layer.assetId);
+        }
+      }
+
+      if (selectedBlock.type === "choice") {
+        if (selectedBlock.backgroundAssetId) void ensureAssetPreviewSrc(selectedBlock.backgroundAssetId);
+        if (selectedBlock.voiceAssetId) void ensureAssetPreviewSrc(selectedBlock.voiceAssetId);
+        for (const layer of selectedBlock.characterLayers ?? []) {
+          if (layer.assetId) void ensureAssetPreviewSrc(layer.assetId);
+        }
+        for (const option of selectedBlock.choices) {
+          if (option.imageAssetId) void ensureAssetPreviewSrc(option.imageAssetId);
+        }
       }
 
       if (selectedBlock.type === "gameplay") {
@@ -1351,6 +1700,9 @@ export function AuthorStudioApp() {
       } else if (block.type === "cinematic") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
         if (block.characterAssetId) wantedAssetIds.add(block.characterAssetId);
+        for (const layer of block.characterLayers ?? []) {
+          if (layer.assetId) wantedAssetIds.add(layer.assetId);
+        }
         if (block.videoAssetId) wantedAssetIds.add(block.videoAssetId);
         if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
       } else if (block.type === "dialogue") {
@@ -1374,6 +1726,9 @@ export function AuthorStudioApp() {
       } else if (block.type === "choice") {
         if (block.backgroundAssetId) wantedAssetIds.add(block.backgroundAssetId);
         if (block.voiceAssetId) wantedAssetIds.add(block.voiceAssetId);
+        for (const layer of block.characterLayers ?? []) {
+          if (layer.assetId) wantedAssetIds.add(layer.assetId);
+        }
         for (const choice of block.choices) {
           if (choice.imageAssetId) wantedAssetIds.add(choice.imageAssetId);
         }
@@ -1429,7 +1784,15 @@ export function AuthorStudioApp() {
   }, []);
 
   const onEdgesChange = useCallback((changes: EdgeChange<EditorEdge>[]) => {
-    setEdges((current) => applyEdgeChanges(changes, current));
+    setEdges((current) => {
+      const edgeById = new Map(current.map((edge) => [edge.id, edge] as const));
+      const safeChanges = changes.filter((change) => {
+        if (change.type !== "remove") return true;
+        const edge = edgeById.get(change.id);
+        return edge ? !isDialogueAutoNextHandle(edge.sourceHandle) : true;
+      });
+      return applyEdgeChanges(safeChanges, current);
+    });
   }, []);
 
   const updateBlock = useCallback(
@@ -1461,6 +1824,24 @@ export function AuthorStudioApp() {
           if (node.id !== sourceId) return node;
 
           if (node.data.block.type === "dialogue") {
+            const continueLineId = lineContinueIdFromHandle(sourceHandle);
+            if (continueLineId) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  block: {
+                    ...node.data.block,
+                    lines: node.data.block.lines.map((line) =>
+                      line.id === continueLineId
+                        ? { ...line, continueTargetBlockId: targetId }
+                        : line,
+                    ),
+                  },
+                },
+              };
+            }
+
             const respId = responseIdFromHandle(sourceHandle);
             if (!respId) return node;
 
@@ -1497,6 +1878,39 @@ export function AuthorStudioApp() {
                     option.label === label
                       ? { ...option, targetBlockId: targetId }
                       : option,
+                  ),
+                },
+              },
+            };
+          }
+
+          if (node.data.block.type === "switch") {
+            if (sourceHandle === SWITCH_DEFAULT_HANDLE) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  block: {
+                    ...node.data.block,
+                    nextBlockId: targetId,
+                  } as StoryBlock,
+                },
+              };
+            }
+
+            const caseId = switchCaseIdFromHandle(sourceHandle);
+            if (!caseId) return node;
+
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                block: {
+                  ...node.data.block,
+                  cases: node.data.block.cases.map((item) =>
+                    item.id === caseId
+                      ? { ...item, targetBlockId: targetId }
+                      : item,
                   ),
                 },
               },
@@ -1695,11 +2109,13 @@ export function AuthorStudioApp() {
         const chapterId = createId("chapter");
         (block as import("@/lib/story").ChapterStartBlock).chapterId = chapterId;
         (block as import("@/lib/story").ChapterStartBlock).chapterTitle = "Nouveau chapitre";
+        (block as import("@/lib/story").ChapterStartBlock).linkedFromChapterId = null;
+        (block as import("@/lib/story").ChapterStartBlock).linkedFromChapterEndBlockId = null;
         setProject((current) => ({
           ...current,
           chapters: [
             ...current.chapters,
-            { id: chapterId, name: "Nouveau chapitre", collapsed: false } satisfies Chapter,
+            { id: chapterId, name: "Nouveau chapitre", collapsed: false, validated: false } satisfies Chapter,
           ],
           info: {
             ...current.info,
@@ -1745,6 +2161,19 @@ export function AuthorStudioApp() {
           if (deletedChapterId && block.chapterId === deletedChapterId) {
             block = { ...block, chapterId: null };
           }
+          if (block.type === "chapter_start") {
+            const shouldClearPreviousChapter =
+              Boolean(deletedChapterId) && block.linkedFromChapterId === deletedChapterId;
+            const shouldClearPreviousEnd =
+              block.linkedFromChapterEndBlockId === blockId;
+            if (shouldClearPreviousChapter || shouldClearPreviousEnd) {
+              block = {
+                ...block,
+                linkedFromChapterId: shouldClearPreviousChapter ? null : block.linkedFromChapterId,
+                linkedFromChapterEndBlockId: null,
+              };
+            }
+          }
           return {
             ...node,
             data: { ...node.data, block },
@@ -1771,6 +2200,10 @@ export function AuthorStudioApp() {
         updatedAt: new Date().toISOString(),
       },
     }));
+
+    if (deletedChapterId) {
+      setOpenedValidatedChapterIds((current) => current.filter((chapterId) => chapterId !== deletedChapterId));
+    }
 
     if (selectedBlockId === blockId) setSelectedBlockId(null);
     logAction("delete_block", `${deleted.name} (${deleted.id})`);
@@ -1804,6 +2237,7 @@ export function AuthorStudioApp() {
         const newLineId = createId("line");
         lineIdMap.set(oldLineId, newLineId);
         line.id = newLineId;
+        line.continueTargetBlockId = null;
         const responses = line.responses as Array<Record<string, unknown>>;
         for (const resp of responses) {
           resp.id = createId("resp");
@@ -1833,6 +2267,14 @@ export function AuthorStudioApp() {
       for (const opt of choices) {
         opt.id = createId("opt");
         opt.targetBlockId = null;
+      }
+    }
+
+    if (selectedBlock.type === "switch") {
+      const cases = clone.cases as Array<Record<string, unknown>>;
+      for (const item of cases) {
+        item.id = createId("switch_case");
+        item.targetBlockId = null;
       }
     }
 
@@ -1878,6 +2320,7 @@ export function AuthorStudioApp() {
   const deleteEdge = useCallback(
     (sourceId: string, sourceHandle: string) => {
       if (!canEdit) return;
+      if (isDialogueAutoNextHandle(sourceHandle)) return;
       const sourceBlock = blockById.get(sourceId);
       if (!sourceBlock) return;
 
@@ -1910,19 +2353,30 @@ export function AuthorStudioApp() {
     return map;
   }, [chapterBlockSets]);
 
+  const edgesWithAutoDialogueLinks = useMemo(() => {
+    const manualEdges = edges.filter((edge) => !isDialogueAutoNextHandle(edge.sourceHandle));
+    const autoEdges = rebuildEdgesFromNodes(nodes).filter((edge) =>
+      isDialogueAutoNextHandle(edge.sourceHandle),
+    );
+    return [...manualEdges, ...autoEdges];
+  }, [edges, nodes]);
+
   const displayEdges = useMemo(
     () => {
-      if (collapsedChapterIds.size === 0) {
-        return edges.map((edge) => ({
+      const onDeleteForEdge = (edge: EditorEdge) =>
+        canEdit && !isDialogueAutoNextHandle(edge.sourceHandle) ? deleteEdge : undefined;
+
+      if (hiddenBlockIds.size === 0) {
+        return edgesWithAutoDialogueLinks.map((edge) => ({
           ...edge,
-          data: { ...edge.data, onDeleteEdge: canEdit ? deleteEdge : undefined },
+          data: { ...edge.data, onDeleteEdge: onDeleteForEdge(edge) },
         }));
       }
 
       const result: Array<EditorEdge & { data?: { onDeleteEdge?: typeof deleteEdge } }> = [];
       const seenFolderEdges = new Set<string>();
 
-      for (const edge of edges) {
+      for (const edge of edgesWithAutoDialogueLinks) {
         const srcHidden = hiddenBlockIds.has(edge.source);
         const tgtHidden = hiddenBlockIds.has(edge.target);
 
@@ -1933,6 +2387,7 @@ export function AuthorStudioApp() {
         if (srcHidden) {
           const srcChapterId = blockChapterMap.get(edge.source);
           if (!srcChapterId) continue;
+          if (!collapsedChapterIds.has(srcChapterId)) continue;
           const key = `folder-${srcChapterId}->>${edge.target}`;
           if (seenFolderEdges.has(key)) continue;
           seenFolderEdges.add(key);
@@ -1950,6 +2405,7 @@ export function AuthorStudioApp() {
         if (tgtHidden) {
           const tgtChapterId = blockChapterMap.get(edge.target);
           if (!tgtChapterId) continue;
+          if (!collapsedChapterIds.has(tgtChapterId)) continue;
           const key = `${edge.source}->>folder-${tgtChapterId}`;
           if (seenFolderEdges.has(key)) continue;
           seenFolderEdges.add(key);
@@ -1965,13 +2421,13 @@ export function AuthorStudioApp() {
         // Both visible: keep as-is
         result.push({
           ...edge,
-          data: { ...edge.data, onDeleteEdge: canEdit ? deleteEdge : undefined },
+          data: { ...edge.data, onDeleteEdge: onDeleteForEdge(edge) },
         });
       }
 
       return result;
     },
-    [blockChapterMap, canEdit, collapsedChapterIds.size, deleteEdge, edges, hiddenBlockIds],
+    [blockChapterMap, canEdit, collapsedChapterIds, deleteEdge, edgesWithAutoDialogueLinks, hiddenBlockIds],
   );
 
   const onConnect = useCallback(
@@ -1999,12 +2455,33 @@ export function AuthorStudioApp() {
         return;
       }
 
+      if (
+        sourceNode.type === "chapter_end" &&
+        targetNode.type === "chapter_start"
+      ) {
+        const sourceChapterId = resolveChapterIdForBlock(sourceNode.id);
+        setChapterStartPreviousLink(
+          targetNode.id,
+          sourceChapterId,
+          sourceNode.id,
+        );
+        logAction("link", `${sourceNode.name} -> ${targetNode.name}`);
+        return;
+      }
+
       if (sourceNode.type === "dialogue") {
         const respId = responseIdFromHandle(connection.sourceHandle);
-        if (!respId) return;
-        const handle = `resp-${respId}`;
-        setConnection(connection.source, handle, connection.target, connection.targetHandle);
-        logAction("link", `${sourceNode.name} resp ${respId} -> ${connection.target}`);
+        if (respId) {
+          const handle = `resp-${respId}`;
+          setConnection(connection.source, handle, connection.target, connection.targetHandle);
+          logAction("link", `${sourceNode.name} resp ${respId} -> ${connection.target}`);
+          return;
+        }
+        const continueLineId = lineContinueIdFromHandle(connection.sourceHandle);
+        if (!continueLineId) return;
+        const handle = `line-continue-${continueLineId}`;
+        setConnection(connection.source, handle, connection.target, null);
+        logAction("link", `${sourceNode.name} continuer ${continueLineId} -> ${connection.target}`);
         return;
       }
 
@@ -2016,6 +2493,25 @@ export function AuthorStudioApp() {
         logAction("link", `${sourceNode.name} choix ${label} -> ${connection.target}`);
         return;
         }
+
+      if (sourceNode.type === "switch") {
+        if (connection.sourceHandle === SWITCH_DEFAULT_HANDLE) {
+          setConnection(
+            connection.source,
+            SWITCH_DEFAULT_HANDLE,
+            connection.target,
+            connection.targetHandle,
+          );
+          logAction("link", `${sourceNode.name} sinon -> ${connection.target}`);
+          return;
+        }
+        const caseId = switchCaseIdFromHandle(connection.sourceHandle);
+        if (!caseId) return;
+        const handle = `switch-case-${caseId}`;
+        setConnection(connection.source, handle, connection.target, connection.targetHandle);
+        logAction("link", `${sourceNode.name} cas ${caseId} -> ${connection.target}`);
+        return;
+      }
 
       if (sourceNode.type === "gameplay") {
         if (connection.sourceHandle === GAMEPLAY_BUTTON_SEQUENCE_SUCCESS_HANDLE) {
@@ -2052,7 +2548,16 @@ export function AuthorStudioApp() {
       setConnection(connection.source, "next", connection.target, connection.targetHandle);
       logAction("link", `${sourceNode.name} -> ${connection.target}`);
     },
-    [blockById, canEdit, linkNpcProfileToDialogue, logAction, setConnection, setStatusMessage],
+    [
+      blockById,
+      canEdit,
+      linkNpcProfileToDialogue,
+      logAction,
+      resolveChapterIdForBlock,
+      setChapterStartPreviousLink,
+      setConnection,
+      setStatusMessage,
+    ],
   );
 
   const updateSelectedBlock = useCallback((updater: (block: StoryBlock) => StoryBlock) => {
@@ -2259,7 +2764,9 @@ export function AuthorStudioApp() {
     const normalizedProject: ProjectMeta = {
       ...payload.project,
       items: normalizeProjectItems((payload.project as ProjectMeta & { items?: unknown }).items),
-      chapters: Array.isArray(payload.project.chapters) ? payload.project.chapters : [],
+      chapters: normalizeProjectChapters(
+        (payload.project as ProjectMeta & { chapters?: unknown }).chapters,
+      ),
     };
     normalizedProject.hero = normalizeProjectHero(
       (payload.project as ProjectMeta & { hero?: unknown }).hero,
@@ -2268,7 +2775,9 @@ export function AuthorStudioApp() {
     );
 
     const hydratedNodes = withCollapsedChapterFolders(normalizedNodes, normalizedProject.chapters);
-    const hydratedEdges = rebuildEdgesFromNodes(normalizedNodes);
+    const hydratedEdges = rebuildEdgesFromNodes(normalizedNodes).filter(
+      (edge) => !isDialogueAutoNextHandle(edge.sourceHandle),
+    );
 
     setProject(normalizedProject);
     setNodes(hydratedNodes);
@@ -2279,6 +2788,7 @@ export function AuthorStudioApp() {
     setCloudProjectUpdatedAt(null);
     setCloudLatestUpdatedAt(null);
     setCloudProfiles({});
+    setOpenedValidatedChapterIds([]);
     setSelectedBlockId(normalizedProject.info.startBlockId ?? null);
     setLastValidation([]);
     markStudioClean(
@@ -2527,12 +3037,18 @@ export function AuthorStudioApp() {
 
   const resetStudioToBlank = (options?: { preserveStatusMessage?: boolean }) => {
     const fresh = buildInitialStudio();
-    setProject(fresh.project);
+    const freshEdges = fresh.edges.filter((edge) => !isDialogueAutoNextHandle(edge.sourceHandle));
+    const normalizedFreshProject: ProjectMeta = {
+      ...fresh.project,
+      chapters: normalizeProjectChapters(fresh.project.chapters),
+    };
+    setProject(normalizedFreshProject);
     setNodes(fresh.nodes);
-    setEdges(fresh.edges);
+    setEdges(freshEdges);
     clearAllAssetState();
     resetGameplayState();
-    setSelectedBlockId(fresh.project.info.startBlockId ?? null);
+    setOpenedValidatedChapterIds([]);
+    setSelectedBlockId(normalizedFreshProject.info.startBlockId ?? null);
     setLastValidation([]);
     resetPreview();
     setCloudProjectId(null);
@@ -2545,7 +3061,7 @@ export function AuthorStudioApp() {
     setCloudLogs([]);
     setCloudProfiles({});
     setShareEmailInput("");
-    markStudioClean(buildStudioChangeFingerprint(fresh.project, fresh.nodes, fresh.edges, {}));
+    markStudioClean(buildStudioChangeFingerprint(normalizedFreshProject, fresh.nodes, freshEdges, {}));
     if (!options?.preserveStatusMessage) {
       setStatusMessage("Nouveau projet initialise.");
     }
@@ -3023,9 +3539,10 @@ export function AuthorStudioApp() {
         project.items,
         result.project.items,
       );
+      const importedChapters = normalizeProjectChapters(result.project.chapters);
       const { mergedChapters, chapterIdMap } = mergeChaptersForZipImport(
         project.chapters,
-        result.project.chapters,
+        importedChapters,
         importedBlocksRaw,
       );
 
@@ -3049,7 +3566,9 @@ export function AuthorStudioApp() {
       const shiftedImportedNodes = placeImportedNodes(currentStoryNodes, remappedImportedNodes);
 
       const mergedStoryNodes = [...currentStoryNodes, ...shiftedImportedNodes];
-      const mergedEdges = rebuildEdgesFromNodes(mergedStoryNodes);
+      const mergedEdges = rebuildEdgesFromNodes(mergedStoryNodes).filter(
+        (edge) => !isDialogueAutoNextHandle(edge.sourceHandle),
+      );
       const mergedVariableIds = new Set(mergedVariables.map((variable) => variable.id));
       const mergedItemIds = new Set(mergedItems.map((item) => item.id));
       const mergedHero = mergeHeroForZipImport(
@@ -3348,6 +3867,8 @@ export function AuthorStudioApp() {
               onRenameItem={renameItem}
               onDeleteItem={deleteItem}
               onReplaceItemIcon={replaceItemIcon}
+              openedValidatedChapterIds={openedValidatedChapterIds}
+              onToggleValidatedChapterVisibility={toggleValidatedChapterVisibility}
             />
           ) : (
             <aside className="panel panel-left">
@@ -3413,6 +3934,7 @@ export function AuthorStudioApp() {
                   canEdit={canEdit}
                   project={project}
                   blocks={blocks}
+                  chapterEndOptionsByChapterId={chapterEndOptionsByChapterId}
                   visibleIssues={visibleIssues}
                   onDeleteSelectedBlock={deleteSelectedBlock}
                   onDuplicateSelectedBlock={duplicateSelectedBlock}
@@ -3471,6 +3993,8 @@ export function AuthorStudioApp() {
                   onRegisterAsset={registerAsset}
                   onEnsureAssetPreviewSrc={ensureAssetPreviewSrc}
                   onStatusMessage={setStatusMessage}
+                  onSetChapterValidationFromEnd={setChapterValidationFromEnd}
+                  onSetChapterStartPreviousLink={setChapterStartPreviousLink}
                 />
               </div>
             )}

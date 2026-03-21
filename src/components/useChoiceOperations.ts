@@ -6,6 +6,7 @@ import {
   ChoiceBlock,
   StoryBlock,
   createId,
+  defaultChoiceOptionLayout,
 } from "@/lib/story";
 
 /* ------------------------------------------------------------------ */
@@ -61,8 +62,12 @@ export function useChoiceOperations({
             text: "",
             description: "",
             imageAssetId: null,
+            layout: defaultChoiceOptionLayout(label),
+            zIndex: 2,
             targetBlockId: null,
             effects: [],
+            heroMemoryVariableId: null,
+            heroMemoryValue: 1,
           },
         ],
       };
@@ -129,7 +134,7 @@ export function useChoiceOperations({
 
   const updateChoiceField = (
     choiceId: string,
-    field: "text" | "targetBlockId",
+    field: "text" | "targetBlockId" | "heroMemoryVariableId" | "heroMemoryValue",
     value: string,
   ) => {
     if (!selectedBlock || selectedBlock.type !== "choice") return;
@@ -143,10 +148,16 @@ export function useChoiceOperations({
 
     updateSelectedBlock((b) => {
       if (b.type === "choice") {
+        const normalizedValue =
+          field === "heroMemoryValue"
+            ? normalizeDelta(value)
+            : field === "heroMemoryVariableId"
+              ? value || null
+              : value;
         return {
           ...b,
           choices: b.choices.map((option) =>
-            option.id === choiceId ? { ...option, [field]: value } : option,
+            option.id === choiceId ? { ...option, [field]: normalizedValue } : option,
           ),
         };
       }

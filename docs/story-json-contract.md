@@ -85,6 +85,7 @@ externe (sortie). Les deux cibles sont mutuellement exclusives.
   - `speaker`: string
   - `text`: string
   - `voicePath`: string | null
+  - `continueTargetBlockId`: string | null (sortie optionnelle du bouton `Continuer` quand la ligne n'a pas de reponses)
   - `responses[]` (max 4 par ligne):
     - `id`: string
     - `label`: `A | B | C | D`
@@ -98,7 +99,15 @@ externe (sortie). Les deux cibles sont mutuellement exclusives.
 Bloc de choix autonome (decision narrative sans dialogue).
 
 - `prompt`: string (question ou contexte affiche au joueur)
+- `displayMode`: `"visual" | "text"` (choix par images cliquables ou liste texte)
 - `backgroundPath`: string | null
+- `sceneLayout`: `{ background, character }` (rectangles `%` pour composer la scene)
+- `characterLayers[]` (utilise en mode `text`, comme dialogue):
+- `id`: string
+- `label`: string
+- `zIndex`: number (1 = devant, 5 = derriere)
+- `layout`: `{ x, y, width, height }`
+- `imagePath`: string | null
 - `voicePath`: string | null
 - `choices[]` (max 4):
 - `id`: string
@@ -106,8 +115,12 @@ Bloc de choix autonome (decision narrative sans dialogue).
 - `text`: string (texte court du bouton)
 - `description`: string (detail ou consequence visible)
 - `imagePath`: string | null (illustration de l option)
+- `layout`: `{ x, y, width, height }` (position/taille clickable dans la scene)
+- `zIndex`: number (1 = devant, 5 = derriere)
 - `targetBlockId`: string | null
 - `effects[]`: `{ variableId, variableName, delta }`
+- `heroMemoryVariableId`: string | null
+- `heroMemoryValue`: number
 
 ### `gameplay` (point_and_click)
 

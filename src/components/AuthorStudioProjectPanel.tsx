@@ -3,7 +3,7 @@ import { Dispatch, SetStateAction, useState } from "react";
 import { normalizeDelta, toSlug } from "@/components/author-studio-core";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { HelpHint } from "@/components/HelpHint";
-import { BlockType, ProjectMeta, createId } from "@/lib/story";
+import { BlockType, ProjectMeta } from "@/lib/story";
 
 interface AuthorStudioProjectPanelProps {
   project: ProjectMeta;
@@ -20,6 +20,8 @@ interface AuthorStudioProjectPanelProps {
   onRenameItem: (itemId: string, name: string) => void;
   onDeleteItem: (itemId: string) => void;
   onReplaceItemIcon: (itemId: string, file: File) => void;
+  openedValidatedChapterIds: string[];
+  onToggleValidatedChapterVisibility: (chapterId: string) => void;
 }
 
 export function AuthorStudioProjectPanel({
@@ -37,10 +39,14 @@ export function AuthorStudioProjectPanel({
   onRenameItem,
   onDeleteItem,
   onReplaceItemIcon,
+  openedValidatedChapterIds,
+  onToggleValidatedChapterVisibility,
 }: AuthorStudioProjectPanelProps) {
   const [newItemName, setNewItemName] = useState("");
   const [newItemIconFile, setNewItemIconFile] = useState<File | null>(null);
   const [itemIconInputKey, setItemIconInputKey] = useState(0);
+  const openedValidatedChapterIdSet = new Set(openedValidatedChapterIds);
+  const validatedChapters = project.chapters.filter((chapter) => chapter.validated);
 
   const submitCreateItem = () => {
     const created = onCreateItem(newItemName, newItemIconFile);
@@ -48,66 +54,6 @@ export function AuthorStudioProjectPanel({
     setNewItemName("");
     setNewItemIconFile(null);
     setItemIconInputKey((current) => current + 1);
-  };
-
-  const addHeroBaseStat = () => {
-    if (!canEdit || project.variables.length === 0) return;
-    const fallbackVariableId = project.variables[0]?.id ?? "";
-    if (!fallbackVariableId) return;
-
-    setProject((current) => ({
-      ...current,
-      hero: {
-        ...current.hero,
-        baseStats: [
-          ...current.hero.baseStats,
-          { id: createId("hero_stat"), variableId: fallbackVariableId, value: 0 },
-        ],
-      },
-      info: {
-        ...current.info,
-        updatedAt: new Date().toISOString(),
-      },
-    }));
-  };
-
-  const addHeroNpc = () => {
-    if (!canEdit) return;
-    setProject((current) => ({
-      ...current,
-      hero: {
-        ...current.hero,
-        npcs: [
-          ...current.hero.npcs,
-          { id: createId("npc"), name: "", lore: "", baseFriendship: 0 },
-        ],
-      },
-      info: {
-        ...current.info,
-        updatedAt: new Date().toISOString(),
-      },
-    }));
-  };
-
-  const addHeroInventoryItem = () => {
-    if (!canEdit || project.items.length === 0) return;
-    const fallbackItemId = project.items[0]?.id ?? "";
-    if (!fallbackItemId) return;
-
-    setProject((current) => ({
-      ...current,
-      hero: {
-        ...current.hero,
-        startingInventory: [
-          ...current.hero.startingInventory,
-          { id: createId("hero_item"), itemId: fallbackItemId, quantity: 1 },
-        ],
-      },
-      info: {
-        ...current.info,
-        updatedAt: new Date().toISOString(),
-      },
-    }));
   };
 
   return (
@@ -177,6 +123,40 @@ export function AuthorStudioProjectPanel({
       </CollapsibleSection>
 
       <CollapsibleSection
+        storageKey="project-validated-chapters"
+        title="Chapitres valides"
+        headerExtra={
+          <HelpHint title="Chapitres archives">
+            Liste des chapitres valides. Clique pour les reafficher temporairement sur le
+            whiteboard.
+          </HelpHint>
+        }
+      >
+        {validatedChapters.length === 0 ? (
+          <p className="empty-placeholder">Aucun chapitre valide pour le moment.</p>
+        ) : (
+          <ul className="list-compact">
+            {validatedChapters.map((chapter, index) => {
+              const isOpen = openedValidatedChapterIdSet.has(chapter.id);
+              return (
+                <li key={chapter.id} className="variable-line">
+                  <span>
+                    {index + 1}. {chapter.name}
+                  </span>
+                  <button
+                    className="button-secondary"
+                    onClick={() => onToggleValidatedChapterVisibility(chapter.id)}
+                  >
+                    {isOpen ? "Masquer" : "Ouvrir"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CollapsibleSection>
+
+      <CollapsibleSection
         storageKey="project-blocks"
         title="Bibliotheque de blocs"
         headerExtra={
@@ -201,6 +181,9 @@ export function AuthorStudioProjectPanel({
           </button>
           <button className="button-soft" onClick={() => onAddBlock("choice")} disabled={!canEdit}>
             + Choix
+          </button>
+          <button className="button-soft" onClick={() => onAddBlock("switch")} disabled={!canEdit}>
+            + Switch
           </button>
           <button className="button-soft" onClick={() => onAddBlock("hero_profile")} disabled={!canEdit}>
             + Fiche Hero
@@ -374,373 +357,6 @@ export function AuthorStudioProjectPanel({
             );
           })}
         </ul>
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        storageKey="project-hero"
-        title="Fiche heros"
-        headerExtra={
-          <HelpHint title="Profil hero">
-            Configure le personnage principal: nom, lore, stats de base, PNJ rencontres et
-            inventaire initial.
-          </HelpHint>
-        }
-      >
-        <label>
-          Nom du heros
-          <input
-            value={project.hero.name}
-            onChange={(event) =>
-              setProject((current) => ({
-                ...current,
-                hero: {
-                  ...current.hero,
-                  name: event.target.value,
-                },
-                info: {
-                  ...current.info,
-                  updatedAt: new Date().toISOString(),
-                },
-              }))
-            }
-            disabled={!canEdit}
-          />
-        </label>
-        <label>
-          Lore du heros
-          <textarea
-            rows={3}
-            value={project.hero.lore}
-            onChange={(event) =>
-              setProject((current) => ({
-                ...current,
-                hero: {
-                  ...current.hero,
-                  lore: event.target.value,
-                },
-                info: {
-                  ...current.info,
-                  updatedAt: new Date().toISOString(),
-                },
-              }))
-            }
-            disabled={!canEdit}
-          />
-        </label>
-
-        <div className="effect-list">
-          <div className="section-title-row">
-            <span>Stats de base</span>
-            <button
-              className="button-secondary"
-              onClick={addHeroBaseStat}
-              disabled={!canEdit || project.variables.length === 0}
-            >
-              + stat
-            </button>
-          </div>
-          {project.hero.baseStats.length === 0 && (
-            <small className="empty-placeholder">
-              Ajoute les points de depart (energie, relation, etc.).
-            </small>
-          )}
-          {project.hero.baseStats.map((stat) => (
-            <div key={stat.id} className="effect-row">
-              <select
-                value={stat.variableId}
-                onChange={(event) =>
-                  setProject((current) => ({
-                    ...current,
-                    hero: {
-                      ...current.hero,
-                      baseStats: current.hero.baseStats.map((item) =>
-                        item.id === stat.id
-                          ? { ...item, variableId: event.target.value }
-                          : item,
-                      ),
-                    },
-                    info: {
-                      ...current.info,
-                      updatedAt: new Date().toISOString(),
-                    },
-                  }))
-                }
-                disabled={!canEdit}
-              >
-                {project.variables.map((variable) => (
-                  <option key={variable.id} value={variable.id}>
-                    {variable.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                value={stat.value}
-                onChange={(event) =>
-                  setProject((current) => ({
-                    ...current,
-                    hero: {
-                      ...current.hero,
-                      baseStats: current.hero.baseStats.map((item) =>
-                        item.id === stat.id
-                          ? { ...item, value: normalizeDelta(event.target.value) }
-                          : item,
-                      ),
-                    },
-                    info: {
-                      ...current.info,
-                      updatedAt: new Date().toISOString(),
-                    },
-                  }))
-                }
-                disabled={!canEdit}
-              />
-              <button
-                className="button-danger"
-                onClick={() =>
-                  setProject((current) => ({
-                    ...current,
-                    hero: {
-                      ...current.hero,
-                      baseStats: current.hero.baseStats.filter((item) => item.id !== stat.id),
-                    },
-                    info: {
-                      ...current.info,
-                      updatedAt: new Date().toISOString(),
-                    },
-                  }))
-                }
-                disabled={!canEdit}
-              >
-                x
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <div className="effect-list">
-          <div className="section-title-row">
-            <span>PNJ rencontres</span>
-            <button className="button-secondary" onClick={addHeroNpc} disabled={!canEdit}>
-              + PNJ
-            </button>
-          </div>
-          {project.hero.npcs.length === 0 && (
-            <small className="empty-placeholder">Ajoute les PNJ que le heros croisera.</small>
-          )}
-          {project.hero.npcs.map((npc) => (
-            <div key={npc.id} className="choice-card">
-              <div className="section-title-row">
-                <strong>{npc.name || "PNJ"}</strong>
-                <button
-                  className="button-danger"
-                  onClick={() =>
-                    setProject((current) => ({
-                      ...current,
-                      hero: {
-                        ...current.hero,
-                        npcs: current.hero.npcs.filter((item) => item.id !== npc.id),
-                      },
-                      info: {
-                        ...current.info,
-                        updatedAt: new Date().toISOString(),
-                      },
-                    }))
-                  }
-                  disabled={!canEdit}
-                >
-                  x
-                </button>
-              </div>
-              <label>
-                Nom PNJ
-                <input
-                  value={npc.name}
-                  onChange={(event) =>
-                    setProject((current) => ({
-                      ...current,
-                      hero: {
-                        ...current.hero,
-                        npcs: current.hero.npcs.map((item) =>
-                          item.id === npc.id
-                            ? { ...item, name: event.target.value }
-                            : item,
-                        ),
-                      },
-                      info: {
-                        ...current.info,
-                        updatedAt: new Date().toISOString(),
-                      },
-                    }))
-                  }
-                  disabled={!canEdit}
-                />
-              </label>
-              <label>
-                Points amitie de base
-                <input
-                  type="number"
-                  value={npc.baseFriendship}
-                  onChange={(event) =>
-                    setProject((current) => ({
-                      ...current,
-                      hero: {
-                        ...current.hero,
-                        npcs: current.hero.npcs.map((item) =>
-                          item.id === npc.id
-                            ? { ...item, baseFriendship: normalizeDelta(event.target.value) }
-                            : item,
-                        ),
-                      },
-                      info: {
-                        ...current.info,
-                        updatedAt: new Date().toISOString(),
-                      },
-                    }))
-                  }
-                  disabled={!canEdit}
-                />
-              </label>
-              <label>
-                Lore PNJ
-                <textarea
-                  rows={2}
-                  value={npc.lore}
-                  onChange={(event) =>
-                    setProject((current) => ({
-                      ...current,
-                      hero: {
-                        ...current.hero,
-                        npcs: current.hero.npcs.map((item) =>
-                          item.id === npc.id
-                            ? { ...item, lore: event.target.value }
-                            : item,
-                        ),
-                      },
-                      info: {
-                        ...current.info,
-                        updatedAt: new Date().toISOString(),
-                      },
-                    }))
-                  }
-                  disabled={!canEdit}
-                />
-              </label>
-            </div>
-          ))}
-        </div>
-
-        <div className="effect-list">
-          <div className="section-title-row">
-            <span>Inventaire de base</span>
-            <button
-              className="button-secondary"
-              onClick={addHeroInventoryItem}
-              disabled={!canEdit || project.items.length === 0}
-            >
-              + objet
-            </button>
-          </div>
-          {project.hero.startingInventory.length === 0 && (
-            <small className="empty-placeholder">Ajoute les objets que le heros possede au depart.</small>
-          )}
-          {project.hero.startingInventory.map((entry) => {
-            const item = project.items.find((candidate) => candidate.id === entry.itemId) ?? null;
-            const iconSrc = assetPreviewSrcById[item?.iconAssetId ?? ""];
-
-            return (
-              <div key={entry.id} className="item-library-row">
-                <div className="item-library-thumb">
-                  {iconSrc ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={iconSrc} alt={item?.name ?? "item"} />
-                  ) : (
-                    <span>item</span>
-                  )}
-                </div>
-                <div className="item-library-main">
-                  <select
-                    value={entry.itemId}
-                    onChange={(event) =>
-                      setProject((current) => ({
-                        ...current,
-                        hero: {
-                          ...current.hero,
-                          startingInventory: current.hero.startingInventory.map((itemEntry) =>
-                            itemEntry.id === entry.id
-                              ? { ...itemEntry, itemId: event.target.value }
-                              : itemEntry,
-                          ),
-                        },
-                        info: {
-                          ...current.info,
-                          updatedAt: new Date().toISOString(),
-                        },
-                      }))
-                    }
-                    disabled={!canEdit}
-                  >
-                    {project.items.map((catalogItem) => (
-                      <option key={catalogItem.id} value={catalogItem.id}>
-                        {catalogItem.name}
-                      </option>
-                    ))}
-                  </select>
-                  <small>{item ? getAssetFileName(item.iconAssetId) : "Objet introuvable"}</small>
-                </div>
-                <div className="item-library-actions">
-                  <input
-                    type="number"
-                    min={1}
-                    value={entry.quantity}
-                    onChange={(event) =>
-                      setProject((current) => ({
-                        ...current,
-                        hero: {
-                          ...current.hero,
-                          startingInventory: current.hero.startingInventory.map((itemEntry) =>
-                            itemEntry.id === entry.id
-                              ? {
-                                  ...itemEntry,
-                                  quantity: Math.max(1, Math.floor(normalizeDelta(event.target.value))),
-                                }
-                              : itemEntry,
-                          ),
-                        },
-                        info: {
-                          ...current.info,
-                          updatedAt: new Date().toISOString(),
-                        },
-                      }))
-                    }
-                    disabled={!canEdit}
-                  />
-                  <button
-                    className="button-danger"
-                    onClick={() =>
-                      setProject((current) => ({
-                        ...current,
-                        hero: {
-                          ...current.hero,
-                          startingInventory: current.hero.startingInventory.filter(
-                            (itemEntry) => itemEntry.id !== entry.id,
-                          ),
-                        },
-                        info: {
-                          ...current.info,
-                          updatedAt: new Date().toISOString(),
-                        },
-                      }))
-                    }
-                    disabled={!canEdit}
-                  >
-                    x
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </CollapsibleSection>
 
       <CollapsibleSection
