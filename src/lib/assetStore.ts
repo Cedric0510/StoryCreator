@@ -154,7 +154,7 @@ async function clearLegacyBlobs(db: IDBDatabase): Promise<void> {
   await done;
 }
 
-export async function computeAssetBlobSha256(blob: Blob): Promise<string> {
+async function computeAssetBlobSha256(blob: Blob): Promise<string> {
   if (!globalThis.crypto?.subtle) {
     throw new Error("Web Crypto API unavailable: cannot compute SHA-256.");
   }
@@ -364,24 +364,6 @@ export async function getAssetBlob(assetId: string): Promise<Blob | null> {
   return withReadyDb((db) => getBlobByAssetIdWithDb(db, assetId));
 }
 
-/** Check whether an asset exists in IndexedDB without reading the blob. */
-export async function hasAssetBlob(assetId: string): Promise<boolean> {
-  await waitForPendingAssetWrites([assetId]);
-  return withReadyDb(async (db) => {
-    const transaction = db.transaction(ASSET_REFS_STORE, "readonly");
-    const store = transaction.objectStore(ASSET_REFS_STORE);
-    const done = waitForTransaction(transaction);
-    const ref = await requestToPromise(store.get(assetId));
-    await done;
-    return Boolean(ref);
-  });
-}
-
-/** Delete one asset from IndexedDB and revoke its Object URL if cached. */
-export async function deleteAssetBlob(assetId: string): Promise<void> {
-  await deleteAssetBlobs([assetId]);
-}
-
 /** Delete many assets at once. */
 export async function deleteAssetBlobs(assetIds: string[]): Promise<void> {
   const uniqueAssetIds = Array.from(new Set(assetIds.filter(Boolean)));
@@ -457,21 +439,4 @@ export function revokeAllObjectURLs(): void {
     URL.revokeObjectURL(url);
   }
   urlCache.clear();
-}
-
-/**
- * Return all asset IDs currently stored in IndexedDB.
- * Useful for orphan cleanup.
- */
-export async function listAssetIds(): Promise<string[]> {
-  await waitForAllPendingWrites();
-
-  return withReadyDb(async (db) => {
-    const transaction = db.transaction(ASSET_REFS_STORE, "readonly");
-    const store = transaction.objectStore(ASSET_REFS_STORE);
-    const done = waitForTransaction(transaction);
-    const keys = await requestToPromise(store.getAllKeys());
-    await done;
-    return keys.filter((key): key is string => typeof key === "string");
-  });
 }

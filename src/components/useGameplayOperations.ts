@@ -148,22 +148,6 @@ export function useGameplayOperations({
     [updateGameplayObject],
   );
 
-  const updateGameplayObjectRect = useCallback(
-    (objectId: string, field: "x" | "y" | "width" | "height", value: number) => {
-      updateGameplayObject(objectId, (obj) => {
-        const updated = { ...obj, [field]: value };
-        return {
-          ...obj,
-          x: sanitizePercent(updated.x, obj.x),
-          y: sanitizePercent(updated.y, obj.y),
-          width: sanitizeGameplaySize(updated.width, obj.width),
-          height: sanitizeGameplaySize(updated.height, obj.height),
-        };
-      });
-    },
-    [updateGameplayObject],
-  );
-
   const clearGameplayObjectAsset = useCallback(
     (objectId: string) => {
       updateGameplayObjectField(objectId, "assetId", null);
@@ -397,7 +381,6 @@ export function useGameplayOperations({
     addGameplayObject,
     removeGameplayObject,
     updateGameplayObjectField,
-    updateGameplayObjectRect,
     clearGameplayObjectAsset,
     clearGameplayObjectSound,
     // Object effects

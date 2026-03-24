@@ -95,8 +95,8 @@ export default function GuidePremierProjetPage() {
       <h2>8. Valider avant sauvegarde finale</h2>
       <ol>
         <li>
-          Clique <code>Valider</code> en haut ou <code>Recontroler</code> dans le panneau
-          Validation.
+          Clique le bouton <code>Validation</code> (vert/jaune/rouge) dans la navbar, puis
+          <code> Recontroler</code> dans la fenetre de validation si besoin.
         </li>
         <li>Corrige les erreurs (cibles manquantes, blocs non relies, etc.).</li>
         <li>Les warnings sont autorises, mais mieux vaut les traiter.</li>

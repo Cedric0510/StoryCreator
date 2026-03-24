@@ -413,29 +413,41 @@ label {
   50% { opacity: 0.5; }
 }
 
-.nav-indicator-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
+.nav-validation-button {
+  appearance: none;
   border-radius: 999px;
-  padding: 0 6px;
+  border: 1px solid transparent;
+  min-height: 24px;
+  padding: 3px 10px;
   font-size: 11px;
   font-weight: 700;
-  line-height: 1;
+  white-space: nowrap;
+  line-height: 1.15;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.15s;
 }
 
-.nav-badge-errors {
-  background: #fef2f2;
-  color: #dc2626;
-  border: 1px solid #fca5a5;
+.nav-validation-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
 }
 
-.nav-badge-ok {
+.nav-validation-button-ok {
   background: #f0fdf4;
-  color: #16a34a;
-  border: 1px solid #86efac;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.nav-validation-button-warning {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #854d0e;
+}
+
+.nav-validation-button-error {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
 }
 
 .nav-indicator-lock {
@@ -776,6 +788,30 @@ label {
 
 .admin-modal-card .cloud-project-row {
   align-items: flex-start;
+}
+
+.validation-modal-card {
+  width: min(760px, 96vw);
+  max-height: min(86vh, 860px);
+  overflow: auto;
+}
+
+.validation-issues-list {
+  max-height: min(62vh, 560px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.validation-issue {
+  border-left-width: 5px;
+}
+
+.validation-issue-error {
+  border-left-color: #dc2626;
+}
+
+.validation-issue-warning {
+  border-left-color: #d97706;
 }
 
 .panel-cloud {
@@ -1810,6 +1846,15 @@ label {
   box-shadow: 0 0 0 6px rgba(14, 165, 166, 0.5), 0 0 20px rgba(14, 165, 166, 0.3), 0 12px 30px rgba(12, 32, 50, 0.18);
   transform: scale(1.04);
   z-index: 10;
+}
+
+.story-node-error {
+  border-width: 5px;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.28), 0 12px 30px rgba(120, 16, 16, 0.16);
+}
+
+.story-node-error.story-node-selected {
+  box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.45), 0 0 22px rgba(220, 38, 38, 0.25), 0 12px 30px rgba(120, 16, 16, 0.2);
 }
 
 .story-node-header {

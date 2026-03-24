@@ -50,15 +50,53 @@ export function useDialogueOperations({
 
   /* ── Lines ── */
 
-  const addDialogueLine = () => {
+  const addDialogueLine = (afterLineId?: string) => {
     const block = asDialogue();
     if (!block) return;
-    const newLine = createDefaultLine();
+    const requestedIndex =
+      afterLineId
+        ? block.lines.findIndex((line) => line.id === afterLineId) + 1
+        : block.lines.length;
+    const insertIndex =
+      requestedIndex > 0 && requestedIndex <= block.lines.length
+        ? requestedIndex
+        : block.lines.length;
+    let defaultSpeaker = "Narrateur";
+    if (afterLineId) {
+      const sourceLine = block.lines.find((line) => line.id === afterLineId) ?? null;
+      const sourceSpeaker = sourceLine?.speaker?.trim();
+      if (sourceSpeaker) {
+        defaultSpeaker = sourceSpeaker;
+      }
+    }
+    if (defaultSpeaker === "Narrateur") {
+      for (let index = insertIndex - 1; index >= 0; index -= 1) {
+        const candidateSpeaker = block.lines[index]?.speaker?.trim();
+        if (candidateSpeaker) {
+          defaultSpeaker = candidateSpeaker;
+          break;
+        }
+      }
+    }
+    if (defaultSpeaker === "Narrateur") {
+      const firstSpeaker = block.lines[0]?.speaker?.trim();
+      if (firstSpeaker) defaultSpeaker = firstSpeaker;
+    }
+    const newLine = createDefaultLine(defaultSpeaker);
     updateSelectedBlock((b) => {
       if (b.type !== "dialogue") return b;
-      return { ...b, lines: [...b.lines, newLine] };
+      const nextLines = [...b.lines];
+      nextLines.splice(insertIndex, 0, newLine);
+      return {
+        ...b,
+        lines: nextLines,
+        startLineId: b.startLineId || newLine.id,
+      };
     });
-    logAction("add_dialogue_line", `${block.id} line ${newLine.id}`);
+    logAction(
+      "add_dialogue_line",
+      `${block.id} line ${newLine.id}${afterLineId ? ` after ${afterLineId}` : ""}`,
+    );
   };
 
   const removeDialogueLine = (lineId: string) => {

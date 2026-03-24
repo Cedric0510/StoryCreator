@@ -21,7 +21,6 @@ import {
   TitleBlock,
   createDefaultHeroProfile,
   createBlock,
-  createGameplayHotspotClickAction,
   createId,
   defaultChoiceOptionLayout,
   normalizeStoryBlock,
@@ -388,64 +387,6 @@ export function collectProjectReferencedAssetIds(
   return referencedAssetIds;
 }
 
-export function clampPercent(value: number) {
-  if (Number.isNaN(value) || !Number.isFinite(value)) return 0;
-  if (value < 0) return 0;
-  if (value > 100) return 100;
-  return Number(value.toFixed(2));
-}
-
-export function normalizeRectPercent(rect: { x: number; y: number; width: number; height: number }) {
-  return {
-    x: clampPercent(rect.x),
-    y: clampPercent(rect.y),
-    width: clampPercent(rect.width <= 0 ? 1 : rect.width),
-    height: clampPercent(rect.height <= 0 ? 1 : rect.height),
-  };
-}
-
-export function defaultGameplayOverlayDraft(): GameplayOverlay {
-  return {
-    id: createId("overlay"),
-    name: "Objet",
-    assetId: null,
-    x: 35,
-    y: 35,
-    width: 20,
-    height: 20,
-    zIndex: 2,
-    visibleByDefault: true,
-    draggable: false,
-  };
-}
-
-export function defaultGameplayHotspotDraft(): GameplayHotspot {
-  return {
-    id: createId("hotspot"),
-    name: "Zone",
-    required: true,
-    message: "",
-    toggleOverlayId: null,
-    soundAssetId: null,
-    effects: [],
-    onClickActions: [],
-    requiredItemId: null,
-    consumeRequiredItem: false,
-    lockedMessage: "",
-    acceptOverlayId: null,
-    x: 35,
-    y: 35,
-    width: 20,
-    height: 20,
-  };
-}
-
-export function defaultGameplayHotspotActionDraft(
-  type: GameplayHotspotClickActionType = "message",
-): GameplayHotspotClickAction {
-  return createGameplayHotspotClickAction(type);
-}
-
 /** V3: IDs of objects that are interactive (not "decoration"). */
 export function interactiveObjectIds(block: GameplayBlock): string[] {
   return block.objects
@@ -453,35 +394,11 @@ export function interactiveObjectIds(block: GameplayBlock): string[] {
     .map((obj) => obj.id);
 }
 
-export function requiredHotspotIds(block: GameplayBlock) {
-  // Legacy compat — if the block still has hotspots (should not after normalization)
-  if (Array.isArray(block.hotspots) && block.hotspots.length > 0) {
-    const required = block.hotspots.filter((hotspot) => hotspot.required).map((hotspot) => hotspot.id);
-    if (required.length > 0) return required;
-    return block.hotspots.map((hotspot) => hotspot.id);
-  }
-  return interactiveObjectIds(block);
-}
-
 export function isGameplayCompleted(block: GameplayBlock, interactedObjectIds: Set<string>) {
   if (block.objects.length === 0) return true;
   if (block.objects.some((obj) => obj.objectType === "button")) return false;
   const mustInteract = interactiveObjectIds(block);
   return mustInteract.every((id) => interactedObjectIds.has(id));
-}
-
-/** @deprecated Legacy V1 completion check — kept for backward compat */
-export function isGameplayPointClickCompleted(block: GameplayBlock, foundHotspotIds: Set<string>) {
-  return isGameplayCompleted(block, foundHotspotIds);
-}
-
-export async function fileToDataUrl(file: File) {
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 export function buildInitialStudio(): InitialStudio {
@@ -554,10 +471,6 @@ export function buildInitialStudio(): InitialStudio {
   };
 
   return { nodes, edges, project };
-}
-
-export function describeEffect(delta: number) {
-  return delta > 0 ? `+${delta}` : `${delta}`;
 }
 
 export function normalizeDelta(value: string) {
@@ -1489,20 +1402,6 @@ export function isCloudPayload(value: unknown): value is CloudPayload {
   );
 }
 
-export function serializeStudioSnapshot(
-  project: ProjectMeta,
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  assetRefs: Record<string, AssetRef>,
-) {
-  return JSON.stringify({
-    project,
-    nodes,
-    edges,
-    assetRefs,
-  });
-}
-
 export function buildStudioChangeFingerprint(
   project: ProjectMeta,
   nodes: EditorNode[],
@@ -1539,3 +1438,4 @@ export function buildStudioChangeFingerprint(
     assetPart,
   ].join("~");
 }
+

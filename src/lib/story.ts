@@ -71,9 +71,6 @@ export interface GameplayObject {
 
 /* â”€â”€ Legacy V2 link types (kept for migration only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-export type GameplayObjectAction =
-  | "pick_up" | "inspect" | "push" | "go_to_block" | "none";
-
 export type GameplayLinkInteraction =
   | "use_on" | "destroy_both" | "reveal";
 
@@ -700,60 +697,6 @@ export function defaultGameplayObject(): GameplayObject {
     successMessage: "",
     soundAssetId: null,
     effects: [],
-  };
-}
-
-/** @deprecated Legacy â€” only used for migration */
-export function defaultGameplayLink(
-  sourceObjectId: string,
-  targetObjectId: string,
-): GameplayLink {
-  return {
-    id: createId("glink"),
-    sourceObjectId,
-    targetObjectId,
-    interaction: "use_on",
-    result: "hide_source",
-    resultObjectId: null,
-    resultBlockId: null,
-    successMessage: "",
-    lockedMessage: "",
-    consumeSource: true,
-  };
-}
-
-export function createGameplayHotspotClickAction(
-  type: GameplayHotspotClickActionType = "message",
-): GameplayHotspotClickAction {
-  if (type === "add_item") {
-    return {
-      id: createId("action"),
-      type,
-      itemId: null,
-      quantity: 1,
-    };
-  }
-
-  if (type === "disable_hotspot") {
-    return {
-      id: createId("action"),
-      type,
-      targetHotspotId: null,
-    };
-  }
-
-  if (type === "go_to_block") {
-    return {
-      id: createId("action"),
-      type,
-      targetBlockId: null,
-    };
-  }
-
-  return {
-    id: createId("action"),
-    type: "message",
-    message: "",
   };
 }
 

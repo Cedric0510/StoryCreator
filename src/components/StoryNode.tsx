@@ -336,6 +336,7 @@ export function ChapterFolderNode({ data, selected }: NodeProps<ChapterFolderEdi
 
 export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
   const color = blockTypeColor(data.block.type);
+  const borderColor = data.hasError ? "#dc2626" : color;
   const summary = blockSummary(data.block);
   const canReceiveConnections =
     data.block.type !== "hero_profile" && data.block.type !== "npc_profile";
@@ -343,8 +344,8 @@ export function StoryNode({ data, selected }: NodeProps<StoryEditorNode>) {
 
   return (
     <div
-      className={`story-node ${selected ? "story-node-selected" : ""}`}
-      style={{ borderColor: color }}
+      className={`story-node ${data.hasError ? "story-node-error" : ""} ${selected ? "story-node-selected" : ""}`}
+      style={{ borderColor }}
     >
       {canReceiveConnections && !hasPerLineHandles && (
         <Handle
